@@ -2426,6 +2426,14 @@ def api_live_packets():
             limit=limit,
             include_unlocated=include_unlocated,
         )
+
+        if after_id is not None and after_id > 0 and result.get("count", 0) == 0:
+            return (
+                "",
+                204,
+                {"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
+
         return safe_jsonify(result)
     except Exception as e:
         logger.error(f"Error in live packets API: {e}", exc_info=True)

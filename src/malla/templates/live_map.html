@@ -36,6 +36,16 @@
     height: 100%;
 }
 
+#packetCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 500;
+}
+
 /* Overlays */
 .map-loading-overlay, .map-error-overlay {
     position: absolute;
@@ -307,6 +317,7 @@
 
         <!-- The Leaflet Map Element -->
         <div id="liveMap"></div>
+        <canvas id="packetCanvas"></canvas>
 
         <!-- Bottom Playback Control Bar -->
         <div class="live-control-bar">
@@ -497,6 +508,10 @@
                 }
 
                 const resp = await fetch(url);
+                if (resp.status === 204) {
+                    // Nothing new! Server returned 204 No Content
+                    return;
+                }
                 if (resp.ok) {
                     const data = await resp.json();
                     if (data.latest_id !== undefined && data.latest_id !== null) {
@@ -549,6 +564,7 @@
             }).addTo(map);
         }
 
+        initCanvasLayer();
         fetchInitialNodes();
     }
 
@@ -578,6 +594,421 @@
         }
     }
 
+    // =========================================================================
+    // 2. Canvas Particle Animation Engine (Step 4)
+    // =========================================================================
+    let packetCanvas = null;
+    let canvasCtx = null;
+    let activeFlights = [];
+    let isCanvasLoopRunning = false;
+
+    function initCanvasLayer() {
+        packetCanvas = document.getElementById('packetCanvas');
+        if (!packetCanvas) return;
+        canvasCtx = packetCanvas.getContext('2d');
+        resizeCanvas();
+
+        window.addEventListener('resize', resizeCanvas);
+        if (map) {
+            map.on('move', onMapTransform);
+            map.on('zoom', onMapTransform);
+            map.on('resize', resizeCanvas);
+        }
+    }
+
+    function resizeCanvas() {
+        if (!packetCanvas) return;
+        const rect = packetCanvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        packetCanvas.width = Math.round(rect.width * dpr);
+        packetCanvas.height = Math.round(rect.height * dpr);
+        if (canvasCtx) {
+            canvasCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+    }
+
+    function onMapTransform() {
+        if (!isCanvasLoopRunning && activeFlights.length > 0) {
+            drawCanvasFrame(performance.now());
+        }
+    }
+
+    function startCanvasLoop() {
+        if (isCanvasLoopRunning) return;
+        isCanvasLoopRunning = true;
+        requestAnimationFrame(renderCanvasLoop);
+    }
+
+    function renderCanvasLoop(now) {
+        if (!packetCanvas || !canvasCtx) {
+            isCanvasLoopRunning = false;
+            return;
+        }
+
+        drawCanvasFrame(now);
+
+        if (activeFlights.length > 0) {
+            requestAnimationFrame(renderCanvasLoop);
+        } else {
+            // Idle state: clear canvas and stop animation loop
+            const rect = packetCanvas.getBoundingClientRect();
+            canvasCtx.clearRect(0, 0, rect.width, rect.height);
+            isCanvasLoopRunning = false;
+        }
+    }
+
+    function getPacketColor(name) {
+        if (!name) return '#00f2fe';
+        if (name.includes('TEXT')) return '#818cf8';      // Indigo / Purple
+        if (name.includes('POSITION')) return '#10b981';  // Emerald Green
+        if (name.includes('TELEMETRY')) return '#f59e0b'; // Amber Gold
+        if (name.includes('ROUTING')) return '#06b6d4';   // Neon Cyan
+        if (name.includes('NODEINFO')) return '#a855f7';  // Violet
+        if (name.includes('NEIGHBOR')) return '#ec4899';  // Hot Pink
+        return '#38bdf8';                                 // Sky Blue
+    }
+
+    function launchPacketFlight(opts) {
+        if (!map || !opts.fromLoc || !opts.toLoc) return;
+
+        // Base flight duration
+        let duration = 950;
+        if (opts.pathType === 'arc_unknown') duration = 1050;
+        else if (opts.pathType === 'relay') duration = 1250;
+        else if (opts.pathType === 'traceroute') duration = Math.max(900, (opts.pathCoords ? opts.pathCoords.length : 2) * 350);
+
+        const flight = {
+            id: 'flight_' + Math.random().toString(36).slice(2, 9),
+            fromLoc: opts.fromLoc,
+            toLoc: opts.toLoc,
+            pathType: opts.pathType || 'direct',
+            hopsAway: opts.hopsAway || 0,
+            relayInfo: opts.relayInfo || null,
+            tracerouteHops: opts.tracerouteHops || null,
+            color: opts.color || '#00f2fe',
+            startTime: performance.now(),
+            duration: duration,
+            fadeDuration: 1800, // ghost trail lingering fade
+            onArrival: opts.onArrival || null,
+            arrivalTriggered: false,
+            relayPulseFired: false
+        };
+
+        activeFlights.push(flight);
+        startCanvasLoop();
+    }
+
+    function drawCanvasFrame(now) {
+        if (!canvasCtx || !packetCanvas) return;
+        const rect = packetCanvas.getBoundingClientRect();
+        canvasCtx.clearRect(0, 0, rect.width, rect.height);
+
+        const flightsToKeep = [];
+
+        for (let i = 0; i < activeFlights.length; i++) {
+            const f = activeFlights[i];
+            const elapsed = now - f.startTime;
+            const t = Math.max(0, Math.min(1, elapsed / f.duration));
+
+            // Check if particle reached destination
+            if (t >= 1 && !f.arrivalTriggered) {
+                f.arrivalTriggered = true;
+                if (typeof f.onArrival === 'function') {
+                    f.onArrival();
+                }
+            }
+
+            // Ghost trail fade phase
+            let fadeAlpha = 1.0;
+            if (t >= 1) {
+                const fadeElapsed = elapsed - f.duration;
+                fadeAlpha = Math.max(0, 1.0 - (fadeElapsed / f.fadeDuration));
+                if (fadeAlpha <= 0) {
+                    continue; // Flight has completely faded, drop it
+                }
+            }
+
+            flightsToKeep.push(f);
+            drawFlight(canvasCtx, f, t, fadeAlpha);
+        }
+
+        activeFlights = flightsToKeep;
+    }
+
+    function drawFlight(ctx, f, t, fadeAlpha) {
+        if (!map) return;
+
+        const s0 = map.latLngToContainerPoint([f.fromLoc.latitude, f.fromLoc.longitude]);
+        const s1 = map.latLngToContainerPoint([f.toLoc.latitude, f.toLoc.longitude]);
+
+        // ==========================================
+        // 1. Curved Arc (Multi-Hop Unknown Intermediate)
+        // ==========================================
+        if (f.pathType === 'arc_unknown') {
+            const dx = s1.x - s0.x;
+            const dy = s1.y - s0.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 4) return;
+
+            const mx = (s0.x + s1.x) / 2;
+            const my = (s0.y + s1.y) / 2;
+            const nx = -dy / dist;
+            const ny = dx / dist;
+            const offset = Math.min(75, Math.max(30, dist * 0.22));
+            const cx = mx + nx * offset;
+            const cy = my + ny * offset;
+
+            // Full faint trajectory line
+            ctx.save();
+            ctx.strokeStyle = f.color;
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = 0.25 * fadeAlpha;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(s0.x, s0.y);
+            ctx.quadraticCurveTo(cx, cy, s1.x, s1.y);
+            ctx.stroke();
+            ctx.restore();
+
+            // Active traveled path or fading ghost beam
+            ctx.save();
+            ctx.strokeStyle = f.color;
+            ctx.shadowColor = f.color;
+            ctx.shadowBlur = 10;
+            ctx.lineWidth = 2.5;
+            ctx.globalAlpha = (t < 1 ? 0.9 : 0.7) * fadeAlpha;
+
+            ctx.beginPath();
+            ctx.moveTo(s0.x, s0.y);
+            const steps = 24;
+            const maxStep = t < 1 ? Math.max(1, Math.round(t * steps)) : steps;
+            for (let i = 1; i <= maxStep; i++) {
+                const u = i / steps;
+                const px = (1 - u) * (1 - u) * s0.x + 2 * (1 - u) * u * cx + u * u * s1.x;
+                const py = (1 - u) * (1 - u) * s0.y + 2 * (1 - u) * u * cy + u * u * s1.y;
+                ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            ctx.restore();
+
+            // Hop count badge at apex of curve (u = 0.5)
+            if (f.hopsAway > 0) {
+                const hx = 0.25 * s0.x + 0.5 * cx + 0.25 * s1.x;
+                const hy = 0.25 * s0.y + 0.5 * cy + 0.25 * s1.y;
+                drawHopBadge(ctx, hx, hy, `${f.hopsAway}h`, f.color, fadeAlpha);
+            }
+
+            // Flying comet particle
+            if (t < 1) {
+                const px = (1 - t) * (1 - t) * s0.x + 2 * (1 - t) * t * cx + t * t * s1.x;
+                const py = (1 - t) * (1 - t) * s0.y + 2 * (1 - t) * t * cy + t * t * s1.y;
+                drawCometHead(ctx, px, py, f.color);
+
+                // Trailing sparks
+                for (let k = 1; k <= 4; k++) {
+                    const tailT = Math.max(0, t - k * 0.035);
+                    const tx = (1 - tailT) * (1 - tailT) * s0.x + 2 * (1 - tailT) * tailT * cx + tailT * tailT * s1.x;
+                    const ty = (1 - tailT) * (1 - tailT) * s0.y + 2 * (1 - tailT) * tailT * cy + tailT * tailT * s1.y;
+                    drawSpark(ctx, tx, ty, f.color, (1 - k * 0.22));
+                }
+            } else {
+                drawArrivalSpark(ctx, s1.x, s1.y, f.color, fadeAlpha);
+            }
+            return;
+        }
+
+        // ==========================================
+        // 2. Multi-Segment (1-Hop Relay)
+        // ==========================================
+        if (f.pathType === 'relay' && f.relayInfo && f.relayInfo.location) {
+            const rLoc = f.relayInfo.location;
+            const sR = map.latLngToContainerPoint([rLoc.latitude, rLoc.longitude]);
+
+            // Draw full faint guide line
+            ctx.save();
+            ctx.strokeStyle = f.color;
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = 0.25 * fadeAlpha;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(s0.x, s0.y);
+            ctx.lineTo(sR.x, sR.y);
+            ctx.lineTo(s1.x, s1.y);
+            ctx.stroke();
+            ctx.restore();
+
+            let currX = s0.x;
+            let currY = s0.y;
+
+            if (t < 0.5) {
+                const u = t / 0.5;
+                currX = s0.x + (sR.x - s0.x) * u;
+                currY = s0.y + (sR.y - s0.y) * u;
+
+                ctx.save();
+                ctx.strokeStyle = f.color;
+                ctx.shadowColor = f.color;
+                ctx.shadowBlur = 10;
+                ctx.lineWidth = 2.5;
+                ctx.globalAlpha = 0.9 * fadeAlpha;
+                ctx.beginPath();
+                ctx.moveTo(s0.x, s0.y);
+                ctx.lineTo(currX, currY);
+                ctx.stroke();
+                ctx.restore();
+            } else {
+                if (!f.relayPulseFired) {
+                    f.relayPulseFired = true;
+                    if (f.relayInfo.node_id && nodeMarkersMap.has(f.relayInfo.node_id)) {
+                        triggerMarkerPulse(nodeMarkersMap.get(f.relayInfo.node_id).marker, '#f59e0b', 34, false);
+                    }
+                }
+
+                const u = (t - 0.5) / 0.5;
+                currX = sR.x + (s1.x - sR.x) * u;
+                currY = sR.y + (s1.y - sR.y) * u;
+
+                ctx.save();
+                ctx.strokeStyle = f.color;
+                ctx.shadowColor = f.color;
+                ctx.shadowBlur = 10;
+                ctx.lineWidth = 2.5;
+                ctx.globalAlpha = (t < 1 ? 0.9 : 0.7) * fadeAlpha;
+                ctx.beginPath();
+                ctx.moveTo(s0.x, s0.y);
+                ctx.lineTo(sR.x, sR.y);
+                ctx.lineTo(currX, currY);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            if (t < 1) {
+                drawCometHead(ctx, currX, currY, f.color);
+            } else {
+                drawArrivalSpark(ctx, s1.x, s1.y, f.color, fadeAlpha);
+            }
+            return;
+        }
+
+        // ==========================================
+        // 3. Direct RF (0 Hops) & Default Straight Path
+        // ==========================================
+        const dx = s1.x - s0.x;
+        const dy = s1.y - s0.y;
+        const currX = s0.x + dx * t;
+        const currY = s0.y + dy * t;
+
+        // Faint guide line
+        ctx.save();
+        ctx.strokeStyle = f.color;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.22 * fadeAlpha;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(s0.x, s0.y);
+        ctx.lineTo(s1.x, s1.y);
+        ctx.stroke();
+        ctx.restore();
+
+        // Traveled glowing path / fading ghost trail
+        ctx.save();
+        ctx.strokeStyle = f.color;
+        ctx.shadowColor = f.color;
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = (t < 1 ? 0.9 : 0.7) * fadeAlpha;
+        ctx.beginPath();
+        ctx.moveTo(s0.x, s0.y);
+        ctx.lineTo(currX, currY);
+        ctx.stroke();
+        ctx.restore();
+
+        // Flying comet head
+        if (t < 1) {
+            drawCometHead(ctx, currX, currY, f.color);
+
+            // Trailing sparks along straight line
+            for (let k = 1; k <= 4; k++) {
+                const tailT = Math.max(0, t - k * 0.035);
+                const tx = s0.x + dx * tailT;
+                const ty = s0.y + dy * tailT;
+                drawSpark(ctx, tx, ty, f.color, (1 - k * 0.22));
+            }
+        } else {
+            drawArrivalSpark(ctx, s1.x, s1.y, f.color, fadeAlpha);
+        }
+    }
+
+    function drawCometHead(ctx, x, y, color) {
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 14;
+
+        // Outer glow halo
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Core white point
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawSpark(ctx, x, y, color, opacity) {
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = Math.max(0, opacity);
+        ctx.beginPath();
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawArrivalSpark(ctx, x, y, color, fadeAlpha) {
+        const radius = 10 + (1.0 - fadeAlpha) * 16;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = fadeAlpha * 0.5;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawHopBadge(ctx, x, y, label, color, fadeAlpha) {
+        ctx.save();
+        ctx.font = 'bold 10px system-ui, -apple-system, sans-serif';
+        const textWidth = ctx.measureText(label).width;
+        const w = textWidth + 10;
+        const h = 17;
+        const bx = x - w / 2;
+        const by = y - h / 2;
+
+        ctx.globalAlpha = Math.max(0.1, fadeAlpha);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(bx, by, w, h, 4);
+        } else {
+            ctx.rect(bx, by, w, h);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x, y);
+        ctx.restore();
+    }
+
     // Dynamic Node Marker Repositioning & Spawning
     function updateOrSpawnNodeMarker(nodeId, lat, lng, nodeData, isPositionUpdate = false) {
         if (!nodeId || isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null;
@@ -594,8 +1025,8 @@
                 existing.lat = lat;
                 existing.lng = lng;
 
-                // Visual relocation indicator (temporary bright green ring)
-                triggerMarkerPulse(existing.marker, '#10b981', 12);
+                // Visual relocation indicator (bright green shockwave ring)
+                triggerMarkerPulse(existing.marker, '#10b981', 32, false);
             }
 
             // Update popup content with newest data
@@ -643,38 +1074,64 @@
         `;
     }
 
-    function triggerMarkerPulse(marker, color = '#00f2fe', maxRadius = 16) {
+    // High-impact marker pulse with dual shockwave rings and marker bloom
+    function triggerMarkerPulse(marker, color = '#00f2fe', maxRadius = 38, isGateway = false) {
         if (!marker || !map) return;
         const latLng = marker.getLatLng();
 
-        const pulseCircle = L.circleMarker(latLng, {
-            radius: 6,
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.6,
-            weight: 2,
-            opacity: 0.9,
-            interactive: false
-        }).addTo(map);
+        // 1. Bloom/flash the marker itself
+        try {
+            const origRadius = marker.getRadius ? marker.getRadius() : 6;
+            const origWeight = marker.options.weight || 1.5;
+            marker.setRadius(origRadius + 3.5);
+            marker.setStyle({ weight: 3, opacity: 1 });
+            setTimeout(() => {
+                if (marker && map && map.hasLayer(marker)) {
+                    marker.setRadius(origRadius);
+                    marker.setStyle({ weight: origWeight });
+                }
+            }, 220);
+        } catch (e) {}
 
-        let currentRadius = 6;
-        let currentOpacity = 0.8;
+        // 2. Double-shockwave ripple rings
+        function launchRing(delayMs, targetRadius, strokeW, startOpacity) {
+            setTimeout(() => {
+                if (!map || !map.hasLayer(marker)) return;
+                const ring = L.circleMarker(latLng, {
+                    radius: 7,
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.45,
+                    weight: strokeW,
+                    opacity: startOpacity,
+                    interactive: false
+                }).addTo(map);
 
-        const pulseInterval = setInterval(() => {
-            currentRadius += 1.5;
-            currentOpacity -= 0.08;
+                let currentRadius = 7;
+                let currentOpacity = startOpacity;
+                const stepRadius = (targetRadius - 7) / 18;
+                const stepOpacity = startOpacity / 18;
 
-            if (currentOpacity <= 0 || currentRadius >= maxRadius) {
-                clearInterval(pulseInterval);
-                map.removeLayer(pulseCircle);
-            } else {
-                pulseCircle.setRadius(currentRadius);
-                pulseCircle.setStyle({
-                    opacity: currentOpacity,
-                    fillOpacity: currentOpacity * 0.5
-                });
-            }
-        }, 30);
+                const interval = setInterval(() => {
+                    currentRadius += stepRadius;
+                    currentOpacity -= stepOpacity;
+
+                    if (currentOpacity <= 0 || currentRadius >= targetRadius) {
+                        clearInterval(interval);
+                        if (map) map.removeLayer(ring);
+                    } else {
+                        ring.setRadius(currentRadius);
+                        ring.setStyle({
+                            opacity: Math.max(0, currentOpacity),
+                            fillOpacity: Math.max(0, currentOpacity * 0.35)
+                        });
+                    }
+                }, 25);
+            }, delayMs);
+        }
+
+        launchRing(0, maxRadius, 3.5, 0.95);
+        launchRing(80, Math.round(maxRadius * 0.72), 2.2, 0.75);
     }
 
     function updateActiveNodesBadge() {
@@ -694,8 +1151,13 @@
     }
 
     // =========================================================================
-    // 3. Live Feed UI & Packet Processing
+    // 3. Live Feed UI, Backlog & Staggered Playback Queue
     // =========================================================================
+    let isInitialBacklogLoaded = false;
+    const packetQueue = [];
+    let isQueuePumping = false;
+    let queueTimeout = null;
+
     function startLiveStream() {
         streamProvider = new PollingStreamProvider('/api/live/packets', 1500);
         streamProvider.onPackets(handleIncomingPackets);
@@ -705,61 +1167,142 @@
     function handleIncomingPackets(packets) {
         if (!packets || packets.length === 0) return;
 
+        if (!isInitialBacklogLoaded) {
+            // Initial load: Pre-populate recent feed quietly without map animations
+            const emptyState = document.getElementById('feedEmptyState');
+            if (emptyState) emptyState.style.display = 'none';
+
+            const feedBody = document.getElementById('liveFeedBody');
+            packets.forEach(pkt => {
+                totalPacketsReceived++;
+                if (pkt.from_node_id && pkt.from_location) {
+                    updateOrSpawnNodeMarker(
+                        pkt.from_node_id,
+                        pkt.from_location.latitude,
+                        pkt.from_location.longitude,
+                        {
+                            long_name: pkt.from_node_name,
+                            short_name: pkt.from_node_short_name,
+                            hex_id: pkt.from_node_hex,
+                        },
+                        pkt.portnum === 3
+                    );
+                }
+                const card = createPacketCard(pkt);
+                if (feedBody) {
+                    feedBody.prepend(card);
+                }
+            });
+
+            pruneFeedCards();
+
+            const countBadge = document.getElementById('feedPacketCount');
+            if (countBadge) countBadge.textContent = String(totalPacketsReceived);
+
+            isInitialBacklogLoaded = true;
+            return;
+        }
+
+        // Live stream: queue incoming packets for staggered playback
+        packets.forEach(pkt => packetQueue.push(pkt));
+        pumpPacketQueue();
+    }
+
+    function pumpPacketQueue() {
+        if (isQueuePumping || packetQueue.length === 0) return;
+        isQueuePumping = true;
+
+        function next() {
+            if (packetQueue.length === 0) {
+                isQueuePumping = false;
+                return;
+            }
+
+            const pkt = packetQueue.shift();
+            playSinglePacket(pkt);
+
+            // Adaptive pacing: 260ms normal, down to 55ms during bursts
+            const delay = packetQueue.length > 6 ? 55 : (packetQueue.length > 2 ? 130 : 260);
+            queueTimeout = setTimeout(next, delay);
+        }
+
+        next();
+    }
+
+    function playSinglePacket(pkt) {
+        totalPacketsReceived++;
+        packetTimestampsWindow.push(Date.now());
+
         const emptyState = document.getElementById('feedEmptyState');
         if (emptyState) emptyState.style.display = 'none';
 
-        const feedBody = document.getElementById('liveFeedBody');
-        const now = Date.now();
-
-        packets.forEach(pkt => {
-            totalPacketsReceived++;
-            packetTimestampsWindow.push(now);
-
-            // 1. Dynamic marker repositioning / spawning if packet has location
-            if (pkt.from_node_id && pkt.from_location) {
-                const lat = pkt.from_location.latitude;
-                const lon = pkt.from_location.longitude;
-                updateOrSpawnNodeMarker(pkt.from_node_id, lat, lon, {
+        // 1. Dynamic marker repositioning / spawning
+        if (pkt.from_node_id && pkt.from_location) {
+            updateOrSpawnNodeMarker(
+                pkt.from_node_id,
+                pkt.from_location.latitude,
+                pkt.from_location.longitude,
+                {
                     long_name: pkt.from_node_name,
                     short_name: pkt.from_node_short_name,
                     hex_id: pkt.from_node_hex,
-                }, pkt.portnum === 3);
-            }
-
-            // 2. Pulse sender marker on transmission
-            if (pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id)) {
-                triggerMarkerPulse(nodeMarkersMap.get(pkt.from_node_id).marker, '#4f46e5', 14);
-            }
-
-            // 3. Pulse gateway markers on reception
-            if (pkt.receptions && pkt.receptions.length > 0) {
-                pkt.receptions.forEach(rec => {
-                    if (rec.gateway_node_id && nodeMarkersMap.has(rec.gateway_node_id)) {
-                        triggerMarkerPulse(nodeMarkersMap.get(rec.gateway_node_id).marker, '#06b6d4', 12);
-                    }
-                });
-            }
-
-            // 4. Render feed card and prepend to top
-            const card = createPacketCard(pkt);
-            if (feedBody) {
-                feedBody.prepend(card);
-            }
-        });
-
-        // Prune old cards exceeding buffer size
-        if (feedBody) {
-            const cards = feedBody.querySelectorAll('.packet-card');
-            for (let i = MAX_FEED_ITEMS; i < cards.length; i++) {
-                cards[i].remove();
-            }
+                },
+                pkt.portnum === 3
+            );
         }
 
-        // Update counter badges
+        const pktColor = getPacketColor(pkt.portnum_name);
+
+        // 2. Transmitter dramatic shockwave pulse
+        if (pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id)) {
+            triggerMarkerPulse(nodeMarkersMap.get(pkt.from_node_id).marker, pktColor, 40, false);
+        }
+
+        // 3. Launch Canvas Particle Flights for each receiving gateway
+        if (pkt.from_location && pkt.receptions && pkt.receptions.length > 0) {
+            pkt.receptions.forEach(rec => {
+                if (!rec.gateway_location) return;
+
+                launchPacketFlight({
+                    fromLoc: pkt.from_location,
+                    toLoc: rec.gateway_location,
+                    gatewayNodeId: rec.gateway_node_id,
+                    pathType: rec.path_type || 'direct',
+                    hopsAway: rec.hops_away != null ? rec.hops_away : 0,
+                    relayInfo: rec.relay_info,
+                    tracerouteHops: rec.traceroute_hops,
+                    color: pktColor,
+                    onArrival: () => {
+                        // Gateway reception shockwave pulse upon packet arrival!
+                        if (rec.gateway_node_id && nodeMarkersMap.has(rec.gateway_node_id)) {
+                            triggerMarkerPulse(nodeMarkersMap.get(rec.gateway_node_id).marker, '#00f2fe', 34, true);
+                        }
+                    }
+                });
+            });
+        }
+
+        // 4. Prepend card to live feed with animated entry
+        const feedBody = document.getElementById('liveFeedBody');
+        if (feedBody) {
+            const card = createPacketCard(pkt);
+            feedBody.prepend(card);
+            pruneFeedCards();
+        }
+
         const countBadge = document.getElementById('feedPacketCount');
         if (countBadge) countBadge.textContent = String(totalPacketsReceived);
 
         updatePacketRate();
+    }
+
+    function pruneFeedCards() {
+        const feedBody = document.getElementById('liveFeedBody');
+        if (!feedBody) return;
+        const cards = feedBody.querySelectorAll('.packet-card');
+        for (let i = MAX_FEED_ITEMS; i < cards.length; i++) {
+            cards[i].remove();
+        }
     }
 
     function createPacketCard(pkt) {

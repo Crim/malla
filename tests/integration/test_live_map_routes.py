@@ -93,3 +93,12 @@ class TestLivePacketsAPI:
         data = response.get_json()
         assert data["count"] <= 100
 
+    @pytest.mark.integration
+    def test_live_packets_returns_204_when_no_new_packets(self, client):
+        """Test that after_id returns HTTP 204 No Content when no newer packets exist."""
+        # Use an impossibly high packet ID
+        response = client.get("/api/live/packets?after_id=999999999")
+        assert response.status_code == 204
+        assert response.data == b""
+        assert "no-cache" in response.headers.get("Cache-Control", "")
+
