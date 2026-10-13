@@ -285,6 +285,135 @@
     z-index: 860;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
+
+/* Feed Toolbar & Filter Pills */
+.live-feed-toolbar {
+    background: var(--bs-tertiary-bg);
+}
+.feed-filter-pills {
+    display: flex;
+    gap: 4px;
+    white-space: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+}
+.feed-filter-pills::-webkit-scrollbar {
+    display: none;
+}
+.filter-pill {
+    font-size: 0.72rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 12px;
+    font-weight: 500;
+}
+.btn-xs {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+    line-height: 1.2;
+}
+
+/* Card Selection & Hover */
+.packet-card {
+    cursor: pointer;
+    user-select: none;
+}
+.packet-card.selected {
+    border-color: #0d6efd !important;
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.4) !important;
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* Floating Packet Inspector Card */
+.packet-inspector-card {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 120px);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    z-index: 870;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+    background-color: rgba(var(--bs-body-bg-rgb), 0.95);
+    animation: inspector-slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes inspector-slide-in {
+    from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.inspector-header {
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bs-tertiary-bg);
+}
+
+.inspector-body {
+    padding: 0.85rem;
+    overflow-y: auto;
+    font-size: 0.82rem;
+}
+
+.inspector-section {
+    margin-bottom: 0.85rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid var(--bs-border-color-translucent);
+}
+.inspector-section:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.inspector-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--bs-secondary-color);
+    margin-bottom: 0.4rem;
+}
+
+.inspector-node-card {
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+}
+
+.inspector-gateway-row {
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    margin-bottom: 0.35rem;
+}
+
+.cursor-pointer {
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    .packet-inspector-card {
+        top: auto;
+        bottom: 80px;
+        left: 8px;
+        right: 8px;
+        width: auto;
+        max-height: 50vh;
+    }
+}
 </style>
 {% endblock %}
 
@@ -318,6 +447,27 @@
         <!-- The Leaflet Map Element -->
         <div id="liveMap"></div>
         <canvas id="packetCanvas"></canvas>
+
+        <!-- Floating Packet Inspector Card -->
+        <div id="packetInspectorCard" class="packet-inspector-card" style="display: none;">
+            <div class="inspector-header">
+                <div class="d-flex align-items-center gap-2">
+                    <span id="inspectorPortBadge" class="packet-type-badge badge-text">💬 TEXT</span>
+                    <span id="inspectorPacketId" class="fw-bold small">#1042</span>
+                </div>
+                <div class="d-flex align-items-center gap-1">
+                    <button class="btn btn-xs btn-outline-primary" id="inspectorReplayBtn" title="Replay Packet Flight">
+                        <i class="bi bi-play-circle"></i> Replay
+                    </button>
+                    <button class="btn btn-sm btn-link text-muted p-0 ms-1" id="inspectorCloseBtn" title="Close Inspector">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="inspector-body" id="inspectorBody">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
 
         <!-- Bottom Playback Control Bar -->
         <div class="live-control-bar">
@@ -370,6 +520,30 @@
             </div>
         </div>
 
+        <!-- Feed Filter & Search Bar -->
+        <div class="live-feed-toolbar px-2 py-2 border-bottom">
+            <div class="feed-filter-pills" id="feedFilterPills">
+                <button type="button" class="btn btn-xs btn-primary filter-pill active" data-filter="ALL">All</button>
+                <button type="button" class="btn btn-xs btn-outline-secondary filter-pill" data-filter="TEXT">💬 Chat</button>
+                <button type="button" class="btn btn-xs btn-outline-secondary filter-pill" data-filter="POSITION">📍 Pos</button>
+                <button type="button" class="btn btn-xs btn-outline-secondary filter-pill" data-filter="TELEMETRY">🔋 Telem</button>
+                <button type="button" class="btn btn-xs btn-outline-secondary filter-pill" data-filter="ROUTING">🧭 Trace</button>
+                <button type="button" class="btn btn-xs btn-outline-secondary filter-pill" data-filter="NODEINFO">ℹ️ Info</button>
+            </div>
+            <!-- Node focus indicator banner -->
+            <div id="nodeFocusBanner" class="node-focus-banner mt-2" style="display: none;">
+                <div class="d-flex align-items-center justify-content-between p-1 px-2 rounded bg-primary-subtle text-primary border border-primary-subtle small">
+                    <span class="d-flex align-items-center gap-1 text-truncate">
+                        <i class="bi bi-funnel-fill"></i>
+                        <span class="fw-semibold text-truncate" id="nodeFocusName">Node</span>
+                    </span>
+                    <button class="btn btn-link btn-xs text-primary p-0 text-decoration-none ms-2" id="clearNodeFocusBtn" title="Clear node filter">
+                        <i class="bi bi-x-circle-fill"></i> Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="live-feed-body" id="liveFeedBody">
             <div class="feed-empty-state" id="feedEmptyState">
                 <i class="bi bi-radar"></i>
@@ -400,6 +574,13 @@
     let totalPacketsReceived = 0;
     const packetTimestampsWindow = []; // for calculating pkts/min
     const MAX_FEED_ITEMS = 100;
+
+    // Filter & Inspection State (Step 5)
+    let activeTypeFilter = 'ALL';
+    let focusedNodeId = null;
+    let inspectedPacket = null;
+    let inspectedRouteGroup = null; // L.layerGroup for pinned route
+    const packetsByIdMap = new Map(); // packet.id -> pkt
 
     // Role colors matching Malla's standard map
     const ROLE_COLORS = {
@@ -563,6 +744,7 @@
             }).addTo(map);
         }
 
+        inspectedRouteGroup = L.layerGroup().addTo(map);
         initCanvasLayer();
         fetchInitialNodes();
     }
@@ -1283,12 +1465,14 @@
     }
 
     function buildPopupHtml(node) {
+        const nodeId = node.node_id;
         return `
-            <div style="min-width: 140px;">
+            <div style="min-width: 145px;">
                 <strong>${escapeHtml(node.long_name || node.short_name || node.hex_id || 'Node')}</strong><br>
                 <small class="text-muted">${escapeHtml(node.hex_id || '')}</small><br>
                 <span class="badge mt-1" style="background-color: ${getNodeColor(node.role)}">${escapeHtml(node.role || 'CLIENT')}</span>
                 ${node.latitude && node.longitude ? `<div class="small text-muted mt-1">${node.latitude.toFixed(4)}, ${node.longitude.toFixed(4)}</div>` : ''}
+                ${nodeId ? `<button type="button" class="btn btn-xs btn-outline-primary w-100 mt-2 py-1" onclick="window.focusNodeOnMap(${nodeId})"><i class="bi bi-funnel"></i> Focus Live Feed</button>` : ''}
             </div>
         `;
     }
@@ -1416,9 +1600,7 @@
             });
 
             pruneFeedCards();
-
-            const countBadge = document.getElementById('feedPacketCount');
-            if (countBadge) countBadge.textContent = String(totalPacketsReceived);
+            updateVisibleFeedCount();
 
             isInitialBacklogLoaded = true;
             return;
@@ -1458,7 +1640,7 @@
         const emptyState = document.getElementById('feedEmptyState');
         if (emptyState) emptyState.style.display = 'none';
 
-        // 1. Dynamic marker repositioning / spawning
+        // 1. Dynamic marker repositioning / spawning (always runs so map positions stay accurate)
         if (pkt.from_node_id && pkt.from_location) {
             updateOrSpawnNodeMarker(
                 pkt.from_node_id,
@@ -1473,20 +1655,21 @@
             );
         }
 
+        const matchesFilter = isPacketMatchingFilter(pkt);
         const pktColor = getPacketColor(pkt.portnum_name);
 
-        // 2. Transmitter dramatic shockwave pulse
-        if (pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id)) {
+        // 2. Transmitter dramatic shockwave pulse (only if matches filter)
+        if (matchesFilter && pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id)) {
             triggerMarkerPulse(nodeMarkersMap.get(pkt.from_node_id).marker, pktColor, 40, false);
         }
 
-        // 3. Launch Canvas Particle Flights for each receiving gateway
+        // 3. Launch Canvas Particle Flights for each receiving gateway (only if matches filter)
         const fromLoc = pkt.from_location || (pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id) ? {
             latitude: nodeMarkersMap.get(pkt.from_node_id).lat,
             longitude: nodeMarkersMap.get(pkt.from_node_id).lng
         } : null);
 
-        if (fromLoc && pkt.receptions && pkt.receptions.length > 0) {
+        if (matchesFilter && fromLoc && pkt.receptions && pkt.receptions.length > 0) {
             pkt.receptions.forEach(rec => {
                 const gwLoc = rec.gateway_location || (rec.gateway_node_id && nodeMarkersMap.has(rec.gateway_node_id) ? {
                     latitude: nodeMarkersMap.get(rec.gateway_node_id).lat,
@@ -1524,9 +1707,9 @@
                     }
                 }
 
-                // For 1-hop relay: resolve relay coordinates if missing
+                // For 1-hop relay or multi-hop relay: resolve relay coordinates if missing
                 let relayInfo = rec.relay_info;
-                if (rec.path_type === 'relay') {
+                if (rec.path_type === 'relay' || rec.path_type === 'multi_hop_relay') {
                     if (!relayInfo && rec.relay_candidate) {
                         relayInfo = rec.relay_candidate;
                     }
@@ -1566,9 +1749,7 @@
             pruneFeedCards();
         }
 
-        const countBadge = document.getElementById('feedPacketCount');
-        if (countBadge) countBadge.textContent = String(totalPacketsReceived);
-
+        updateVisibleFeedCount();
         updatePacketRate();
     }
 
@@ -1577,6 +1758,9 @@
         if (!feedBody) return;
         const cards = feedBody.querySelectorAll('.packet-card');
         for (let i = MAX_FEED_ITEMS; i < cards.length; i++) {
+            if (cards[i]._pkt) {
+                packetsByIdMap.delete(cards[i]._pkt.id);
+            }
             cards[i].remove();
         }
     }
@@ -1585,6 +1769,24 @@
         const card = document.createElement('div');
         const typeClass = getPacketTypeClass(pkt.portnum_name);
         card.className = `packet-card ${typeClass}`;
+        card._pkt = pkt;
+        card.dataset.packetId = pkt.id;
+        if (pkt.from_node_id) card.dataset.fromNodeId = pkt.from_node_id;
+        card.dataset.packetType = getFilterCategory(pkt.portnum_name);
+        packetsByIdMap.set(pkt.id, pkt);
+
+        if (inspectedPacket && inspectedPacket.id === pkt.id) {
+            card.classList.add('selected');
+        }
+
+        if (!isPacketMatchingFilter(pkt)) {
+            card.classList.add('d-none');
+        }
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('a') || e.target.closest('button')) return;
+            inspectPacket(pkt, card);
+        });
 
         const timeStr = formatTimestamp(pkt.timestamp);
         const fromName = pkt.from_node_name || pkt.from_node_hex || 'Unknown';
@@ -1700,6 +1902,478 @@
     }
 
     // =========================================================================
+    // 3.5. Filtering & Packet Inspector (Step 5)
+    // =========================================================================
+    function getFilterCategory(name) {
+        if (!name) return 'OTHER';
+        if (name.includes('TEXT')) return 'TEXT';
+        if (name.includes('POSITION')) return 'POSITION';
+        if (name.includes('TELEMETRY')) return 'TELEMETRY';
+        if (name.includes('ROUTING')) return 'ROUTING';
+        if (name.includes('NODEINFO') || name.includes('NEIGHBOR')) return 'NODEINFO';
+        return 'OTHER';
+    }
+
+    function isPacketMatchingFilter(pkt) {
+        if (!pkt) return false;
+        // 1. Port/App category filter
+        if (activeTypeFilter !== 'ALL') {
+            const cat = getFilterCategory(pkt.portnum_name);
+            if (cat !== activeTypeFilter) return false;
+        }
+
+        // 2. Focused node filter
+        if (focusedNodeId !== null) {
+            const matchFrom = pkt.from_node_id === focusedNodeId;
+            const matchTo = pkt.to_node_id === focusedNodeId;
+            const matchRec = pkt.receptions && pkt.receptions.some(r =>
+                r.gateway_node_id === focusedNodeId ||
+                (r.relay_candidate && r.relay_candidate.node_id === focusedNodeId) ||
+                (r.relay_info && r.relay_info.node_id === focusedNodeId) ||
+                (r.traceroute_hops && r.traceroute_hops.some(h => (h.node_id != null ? h.node_id : h) === focusedNodeId))
+            );
+            if (!matchFrom && !matchTo && !matchRec) return false;
+        }
+
+        return true;
+    }
+
+    function applyFeedFilters() {
+        const feedBody = document.getElementById('liveFeedBody');
+        if (!feedBody) return;
+        const cards = feedBody.querySelectorAll('.packet-card');
+        let visibleCount = 0;
+        cards.forEach(card => {
+            if (card._pkt && isPacketMatchingFilter(card._pkt)) {
+                card.classList.remove('d-none');
+                visibleCount++;
+            } else {
+                card.classList.add('d-none');
+            }
+        });
+
+        const countBadge = document.getElementById('feedPacketCount');
+        if (countBadge) countBadge.textContent = String(visibleCount);
+    }
+
+    function updateVisibleFeedCount() {
+        const feedBody = document.getElementById('liveFeedBody');
+        if (!feedBody) return;
+        const visibleCards = feedBody.querySelectorAll('.packet-card:not(.d-none)');
+        const countBadge = document.getElementById('feedPacketCount');
+        if (countBadge) countBadge.textContent = String(visibleCards.length);
+    }
+
+    window.focusNodeOnMap = function(nodeId) {
+        if (!nodeId) return;
+        focusedNodeId = Number(nodeId);
+
+        const markerData = nodeMarkersMap.get(focusedNodeId);
+        const nodeName = markerData && markerData.nodeData ?
+            (markerData.nodeData.long_name || markerData.nodeData.short_name || markerData.nodeData.hex_id || `Node #${nodeId}`) :
+            `Node #${nodeId}`;
+
+        const banner = document.getElementById('nodeFocusBanner');
+        const nameElem = document.getElementById('nodeFocusName');
+        if (banner && nameElem) {
+            nameElem.textContent = nodeName;
+            banner.style.display = 'block';
+        }
+
+        if (markerData && map) {
+            map.panTo([markerData.lat, markerData.lng], { animate: true });
+            triggerMarkerPulse(markerData.marker, '#00f2fe', 42, false);
+        }
+
+        applyFeedFilters();
+    };
+
+    function clearNodeFocus() {
+        focusedNodeId = null;
+        const banner = document.getElementById('nodeFocusBanner');
+        if (banner) banner.style.display = 'none';
+        applyFeedFilters();
+    }
+
+    function getArcLatLngPoints(p0, p1, numSegments = 30) {
+        const lat0 = p0[0], lng0 = p0[1];
+        const lat1 = p1[0], lng1 = p1[1];
+        const midLat = (lat0 + lat1) / 2;
+        const midLng = (lng0 + lng1) / 2;
+        const dLat = lat1 - lat0;
+        const dLng = lng1 - lng0;
+        const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+
+        const offset = Math.min(dist * 0.22, 1.2);
+        const perpLat = -dLng / (dist || 1) * offset;
+        const perpLng = dLat / (dist || 1) * offset;
+        const ctrlLat = midLat + perpLat;
+        const ctrlLng = midLng + perpLng;
+
+        const points = [];
+        for (let i = 0; i <= numSegments; i++) {
+            const t = i / numSegments;
+            const lat = (1 - t) * (1 - t) * lat0 + 2 * (1 - t) * t * ctrlLat + t * t * lat1;
+            const lng = (1 - t) * (1 - t) * lng0 + 2 * (1 - t) * t * ctrlLng + t * t * lng1;
+            points.push([lat, lng]);
+        }
+        return points;
+    }
+
+    function resolveCoord(nodeId, locObj) {
+        if (locObj && locObj.latitude != null && locObj.longitude != null) {
+            const lat = Number(locObj.latitude);
+            const lng = Number(locObj.longitude);
+            if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
+                return [lat, lng];
+            }
+        }
+        if (nodeId && nodeMarkersMap.has(nodeId)) {
+            const m = nodeMarkersMap.get(nodeId);
+            return [m.lat, m.lng];
+        }
+        return null;
+    }
+
+    function formatPathTypeBadge(pathType) {
+        if (!pathType || pathType === 'direct') return '<span class="badge text-bg-success-subtle text-success">Direct RF</span>';
+        if (pathType === 'relay') return '<span class="badge text-bg-warning-subtle text-warning">1-Hop Relay</span>';
+        if (pathType === 'multi_hop_relay') return '<span class="badge text-bg-warning-subtle text-warning">Multi-Hop Relay</span>';
+        if (pathType === 'traceroute') return '<span class="badge text-bg-info-subtle text-info">Traceroute</span>';
+        if (pathType === 'arc_unknown') return '<span class="badge text-bg-secondary-subtle text-secondary">Curved Arc</span>';
+        return `<span class="badge text-bg-light">${escapeHtml(pathType)}</span>`;
+    }
+
+    function inspectPacket(pkt, cardElement) {
+        if (!pkt) return;
+        inspectedPacket = pkt;
+
+        // Visual selection on card
+        document.querySelectorAll('.packet-card.selected').forEach(c => c.classList.remove('selected'));
+        if (cardElement) {
+            cardElement.classList.add('selected');
+        }
+
+        // Header
+        const inspectorCard = document.getElementById('packetInspectorCard');
+        const portBadge = document.getElementById('inspectorPortBadge');
+        const packetId = document.getElementById('inspectorPacketId');
+        if (portBadge) {
+            portBadge.className = `packet-type-badge ${getBadgeClass(pkt.portnum_name)}`;
+            portBadge.textContent = `${getPacketTypeIcon(pkt.portnum_name)} ${formatPortName(pkt.portnum_name)}`;
+        }
+        if (packetId) {
+            packetId.textContent = `#${pkt.id}` + (pkt.mesh_packet_id ? ` (0x${(pkt.mesh_packet_id >>> 0).toString(16)})` : '');
+        }
+
+        renderInspectorBody(pkt);
+
+        if (inspectorCard) {
+            inspectorCard.style.display = 'flex';
+        }
+
+        drawInspectedRouteOnMap(pkt);
+    }
+
+    function closeInspector() {
+        inspectedPacket = null;
+        const inspectorCard = document.getElementById('packetInspectorCard');
+        if (inspectorCard) inspectorCard.style.display = 'none';
+        if (inspectedRouteGroup) inspectedRouteGroup.clearLayers();
+        document.querySelectorAll('.packet-card.selected').forEach(c => c.classList.remove('selected'));
+    }
+
+    function renderInspectorBody(pkt) {
+        const body = document.getElementById('inspectorBody');
+        if (!body) return;
+
+        const fromName = pkt.from_node_name || pkt.from_node_hex || 'Unknown';
+        const fromHex = pkt.from_node_hex || '';
+        const toName = pkt.to_node_name || (pkt.is_broadcast ? 'Broadcast (^all)' : 'Node');
+        const toHex = pkt.to_node_hex || '';
+        const timeStr = formatTimestamp(pkt.timestamp);
+
+        let html = `
+            <div class="inspector-section">
+                <div class="inspector-section-title"><i class="bi bi-broadcast"></i> Transmission</div>
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div>
+                        <div class="fw-bold">${escapeHtml(fromName)}</div>
+                        <span class="badge text-bg-light border font-monospace" style="font-size: 0.72rem;">${escapeHtml(fromHex)}</span>
+                    </div>
+                    <i class="bi bi-arrow-right text-muted fs-5"></i>
+                    <div class="text-end">
+                        <div class="fw-bold">${escapeHtml(toName)}</div>
+                        <span class="badge text-bg-light border font-monospace" style="font-size: 0.72rem;">${escapeHtml(toHex)}</span>
+                    </div>
+                </div>
+                <div class="d-flex align-items-center justify-content-between text-muted small mt-1">
+                    <span>Channel: <strong>${escapeHtml(pkt.channel_id || 'Primary')}</strong></span>
+                    <span>${escapeHtml(timeStr)}</span>
+                </div>
+            </div>
+        `;
+
+        if (pkt.text_preview) {
+            html += `
+                <div class="inspector-section">
+                    <div class="inspector-section-title"><i class="bi bi-chat-text"></i> Decoded Message</div>
+                    <div class="packet-text-snippet p-2">${escapeHtml(pkt.text_preview)}</div>
+                </div>
+            `;
+        }
+
+        if (pkt.receptions && pkt.receptions.length > 0) {
+            html += `
+                <div class="inspector-section">
+                    <div class="inspector-section-title d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-reception-4"></i> Receptions (${pkt.receptions.length} gateway${pkt.receptions.length > 1 ? 's' : ''})</span>
+                    </div>
+            `;
+
+            pkt.receptions.forEach(rec => {
+                const gwName = rec.gateway_name || rec.gateway_id || 'Unknown';
+                const snrText = rec.snr != null ? `${rec.snr.toFixed(1)} dB` : '—';
+                const snrBadgeClass = rec.snr != null && rec.snr >= 0 ? 'bg-success' : 'bg-secondary';
+                const hopsLabel = rec.hops_away === 0 ? 'Direct (0 hops)' : `${rec.hops_away} hop${rec.hops_away > 1 ? 's' : ''}`;
+                const pathTypeBadge = formatPathTypeBadge(rec.path_type);
+
+                html += `
+                    <div class="inspector-gateway-row">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <strong>${escapeHtml(gwName)}</strong>
+                            <div>
+                                <span class="badge ${snrBadgeClass}">${snrText}</span>
+                                <span class="badge text-bg-light border">${hopsLabel}</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between mt-1 text-muted" style="font-size: 0.75rem;">
+                            <span>Path: ${pathTypeBadge}</span>
+                            ${rec.rssi != null ? `<span>RSSI: <strong>${rec.rssi} dBm</strong></span>` : ''}
+                        </div>
+                `;
+
+                const relay = rec.relay_candidate || rec.relay_info;
+                if (relay) {
+                    html += `
+                        <div class="mt-2 pt-1 border-top" style="font-size: 0.75rem;">
+                            <div class="text-muted"><i class="bi bi-bezier2 text-warning"></i> Relay Station:</div>
+                            <div class="fw-semibold text-warning-emphasis">${escapeHtml(relay.name)} (${escapeHtml(relay.hex_id || '')})</div>
+                            ${relay.remaining_hops != null ? `<div class="text-muted small">+${relay.remaining_hops} unobserved mesh hop${relay.remaining_hops > 1 ? 's' : ''}</div>` : ''}
+                        </div>
+                    `;
+                }
+
+                if (rec.traceroute_hops && rec.traceroute_hops.length > 0) {
+                    html += `
+                        <div class="mt-2 pt-1 border-top" style="font-size: 0.75rem;">
+                            <div class="text-muted mb-1"><i class="bi bi-compass text-info"></i> Traceroute Hops:</div>
+                            <ol class="mb-0 ps-3 text-muted">
+                    `;
+                    rec.traceroute_hops.forEach(h => {
+                        const hName = typeof h === 'object' ? (h.name || h.hex_id || `Node #${h.node_id}`) : `Node #${h}`;
+                        html += `<li><strong>${escapeHtml(hName)}</strong></li>`;
+                    });
+                    html += `</ol></div>`;
+                }
+
+                html += `</div>`;
+            });
+
+            html += `</div>`;
+        }
+
+        html += `
+            <div class="d-flex align-items-center gap-2 pt-1">
+                <button type="button" class="btn btn-xs btn-outline-primary flex-fill" id="inspectorFitBtn">
+                    <i class="bi bi-arrows-fullscreen"></i> Fit Map to Route
+                </button>
+                ${pkt.from_node_id ? `
+                <button type="button" class="btn btn-xs btn-outline-secondary flex-fill" id="inspectorFocusSenderBtn">
+                    <i class="bi bi-funnel"></i> Filter to Sender
+                </button>` : ''}
+            </div>
+        `;
+
+        body.innerHTML = html;
+
+        const fitBtn = document.getElementById('inspectorFitBtn');
+        if (fitBtn) {
+            fitBtn.addEventListener('click', () => {
+                if (window._currentInspectedBounds && window._currentInspectedBounds.isValid()) {
+                    map.fitBounds(window._currentInspectedBounds, { padding: [80, 80], maxZoom: 15 });
+                }
+            });
+        }
+
+        const focusSenderBtn = document.getElementById('inspectorFocusSenderBtn');
+        if (focusSenderBtn && pkt.from_node_id) {
+            focusSenderBtn.addEventListener('click', () => {
+                window.focusNodeOnMap(pkt.from_node_id);
+            });
+        }
+    }
+
+    function drawInspectedRouteOnMap(pkt) {
+        if (!map || !inspectedRouteGroup) return;
+        inspectedRouteGroup.clearLayers();
+
+        const bounds = L.latLngBounds();
+        const fromCoord = resolveCoord(pkt.from_node_id, pkt.from_location);
+
+        if (fromCoord) {
+            bounds.extend(fromCoord);
+            L.circleMarker(fromCoord, {
+                radius: 10,
+                fillColor: '#00f2fe',
+                color: '#ffffff',
+                weight: 2.5,
+                fillOpacity: 0.95,
+                interactive: false
+            }).addTo(inspectedRouteGroup);
+        }
+
+        if (pkt.receptions && pkt.receptions.length > 0) {
+            pkt.receptions.forEach(rec => {
+                const gwCoord = resolveCoord(rec.gateway_node_id, rec.gateway_location);
+                if (gwCoord) {
+                    bounds.extend(gwCoord);
+                    L.circleMarker(gwCoord, {
+                        radius: 10,
+                        fillColor: '#10b981',
+                        color: '#ffffff',
+                        weight: 2.5,
+                        fillOpacity: 0.95,
+                        interactive: false
+                    }).addTo(inspectedRouteGroup);
+
+                    if (!fromCoord) return;
+
+                    if (rec.path_type === 'direct') {
+                        L.polyline([fromCoord, gwCoord], {
+                            color: '#00f2fe',
+                            weight: 4,
+                            opacity: 0.9,
+                            dashArray: '8, 8'
+                        }).addTo(inspectedRouteGroup);
+                    } else if (rec.path_type === 'relay') {
+                        const relay = rec.relay_candidate || rec.relay_info;
+                        const relayCoord = relay ? resolveCoord(relay.node_id, relay.location) : null;
+                        if (relayCoord) {
+                            bounds.extend(relayCoord);
+                            L.circleMarker(relayCoord, {
+                                radius: 8,
+                                fillColor: '#f59e0b',
+                                color: '#ffffff',
+                                weight: 2,
+                                fillOpacity: 0.95,
+                                interactive: false
+                            }).addTo(inspectedRouteGroup);
+
+                            L.polyline([fromCoord, relayCoord], {
+                                color: '#f59e0b',
+                                weight: 3.5,
+                                opacity: 0.85,
+                                dashArray: '6, 6'
+                            }).addTo(inspectedRouteGroup);
+
+                            L.polyline([relayCoord, gwCoord], {
+                                color: '#00f2fe',
+                                weight: 4,
+                                opacity: 0.9
+                            }).addTo(inspectedRouteGroup);
+                        } else {
+                            const arcPts = getArcLatLngPoints(fromCoord, gwCoord);
+                            L.polyline(arcPts, {
+                                color: '#f59e0b',
+                                weight: 3.5,
+                                opacity: 0.85,
+                                dashArray: '6, 6'
+                            }).addTo(inspectedRouteGroup);
+                        }
+                    } else if (rec.path_type === 'multi_hop_relay') {
+                        const relay = rec.relay_candidate || rec.relay_info;
+                        const relayCoord = relay ? resolveCoord(relay.node_id, relay.location) : null;
+                        if (relayCoord) {
+                            bounds.extend(relayCoord);
+                            L.circleMarker(relayCoord, {
+                                radius: 8,
+                                fillColor: '#f59e0b',
+                                color: '#ffffff',
+                                weight: 2,
+                                fillOpacity: 0.95,
+                                interactive: false
+                            }).addTo(inspectedRouteGroup);
+
+                            const arcPts = getArcLatLngPoints(fromCoord, relayCoord);
+                            L.polyline(arcPts, {
+                                color: '#f59e0b',
+                                weight: 3.5,
+                                opacity: 0.85,
+                                dashArray: '4, 4'
+                            }).addTo(inspectedRouteGroup);
+
+                            L.polyline([relayCoord, gwCoord], {
+                                color: '#00f2fe',
+                                weight: 4,
+                                opacity: 0.9
+                            }).addTo(inspectedRouteGroup);
+                        } else {
+                            const arcPts = getArcLatLngPoints(fromCoord, gwCoord);
+                            L.polyline(arcPts, {
+                                color: '#38bdf8',
+                                weight: 3.5,
+                                opacity: 0.85,
+                                dashArray: '6, 6'
+                            }).addTo(inspectedRouteGroup);
+                        }
+                    } else if (rec.path_type === 'traceroute') {
+                        const points = [fromCoord];
+                        if (rec.traceroute_hops && rec.traceroute_hops.length > 0) {
+                            rec.traceroute_hops.forEach(hop => {
+                                const hId = typeof hop === 'object' ? hop.node_id : hop;
+                                const hLoc = typeof hop === 'object' ? hop : null;
+                                const hCoord = resolveCoord(hId, hLoc);
+                                if (hCoord) {
+                                    points.push(hCoord);
+                                    bounds.extend(hCoord);
+                                    L.circleMarker(hCoord, {
+                                        radius: 7,
+                                        fillColor: '#06b6d4',
+                                        color: '#ffffff',
+                                        weight: 2,
+                                        fillOpacity: 0.95,
+                                        interactive: false
+                                    }).addTo(inspectedRouteGroup);
+                                }
+                            });
+                        }
+                        points.push(gwCoord);
+                        L.polyline(points, {
+                            color: '#06b6d4',
+                            weight: 4.5,
+                            opacity: 0.95
+                        }).addTo(inspectedRouteGroup);
+                    } else {
+                        const arcPts = getArcLatLngPoints(fromCoord, gwCoord);
+                        L.polyline(arcPts, {
+                            color: '#38bdf8',
+                            weight: 3.5,
+                            opacity: 0.85,
+                            dashArray: '6, 6'
+                        }).addTo(inspectedRouteGroup);
+                    }
+                }
+            });
+        }
+
+        window._currentInspectedBounds = bounds;
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [80, 80], maxZoom: 15 });
+        }
+    }
+
+    // =========================================================================
     // 4. UI Events & Controls
     // =========================================================================
     const sidebar = document.getElementById('liveFeedSidebar');
@@ -1729,6 +2403,9 @@
                     </div>
                 `;
             }
+            packetsByIdMap.clear();
+            closeInspector();
+            updateVisibleFeedCount();
         });
     }
 
@@ -1755,6 +2432,53 @@
             }
         });
     }
+
+    // Filter pills event wiring
+    const filterPills = document.querySelectorAll('#feedFilterPills .filter-pill');
+    filterPills.forEach(pill => {
+        pill.addEventListener('click', () => {
+            filterPills.forEach(p => {
+                p.classList.remove('active', 'btn-primary');
+                p.classList.add('btn-outline-secondary');
+            });
+            pill.classList.remove('btn-outline-secondary');
+            pill.classList.add('active', 'btn-primary');
+            activeTypeFilter = pill.dataset.filter || 'ALL';
+            applyFeedFilters();
+        });
+    });
+
+    // Clear node focus
+    const clearNodeFocusBtn = document.getElementById('clearNodeFocusBtn');
+    if (clearNodeFocusBtn) {
+        clearNodeFocusBtn.addEventListener('click', clearNodeFocus);
+    }
+
+    // Inspector Close & Replay buttons
+    const inspectorCloseBtn = document.getElementById('inspectorCloseBtn');
+    if (inspectorCloseBtn) {
+        inspectorCloseBtn.addEventListener('click', closeInspector);
+    }
+
+    const inspectorReplayBtn = document.getElementById('inspectorReplayBtn');
+    if (inspectorReplayBtn) {
+        inspectorReplayBtn.addEventListener('click', () => {
+            if (inspectedPacket) {
+                playSinglePacket(inspectedPacket);
+            }
+        });
+    }
+
+    // Keyboard shortcuts (Escape key clears inspector or node focus)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (inspectedPacket) {
+                closeInspector();
+            } else if (focusedNodeId !== null) {
+                clearNodeFocus();
+            }
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', initMap);
 })();

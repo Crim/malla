@@ -15,6 +15,8 @@ class TestLiveMapRoutes:
         assert b"liveMap" in response.data
         assert b"liveFeedSidebar" in response.data
         assert b"live-status-pill" in response.data
+        assert b"packetInspectorCard" in response.data
+        assert b"feedFilterPills" in response.data
 
     @pytest.mark.integration
     def test_live_map_in_navbar(self, client):
