@@ -4,6 +4,7 @@ Service modules for business logic
 
 from .analytics_service import AnalyticsService
 from .gateway_service import GatewayService
+from .live_packet_service import LivePacketService
 from .location_service import LocationService
 from .node_service import NodeNotFoundError, NodeService
 from .traceroute_service import TracerouteService
@@ -15,4 +16,6 @@ __all__ = [
     "NodeService",
     "NodeNotFoundError",
     "GatewayService",
+    "LivePacketService",
 ]
+

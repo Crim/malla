@@ -2397,7 +2397,48 @@ def api_chat_relay_filters():
         return jsonify({"error": str(e), "relay_filters": {}}), 500
 
 
+@api_bp.route("/live/packets")
+def api_live_packets():
+    """
+    Get live packet stream with resolved geospatial routes.
+
+    Query parameters:
+        after_id (int, optional): Return packets with id > after_id.
+        limit (int, optional): Max packets (1..100, default 50).
+        include_unlocated (bool, optional): Include packets without coordinates (default true).
+    """
+    try:
+        after_id_str = request.args.get("after_id")
+        after_id = (
+            int(after_id_str)
+            if after_id_str is not None and after_id_str.isdigit()
+            else None
+        )
+
+        limit = _clamp_limit(default=50, maximum=100)
+        include_unlocated_str = request.args.get("include_unlocated", "true").lower()
+        include_unlocated = include_unlocated_str not in ("0", "false", "no")
+
+        from ..services.live_packet_service import LivePacketService
+
+        result = LivePacketService.get_live_packets(
+            after_id=after_id,
+            limit=limit,
+            include_unlocated=include_unlocated,
+        )
+        return safe_jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in live packets API: {e}", exc_info=True)
+        return (
+            safe_jsonify(
+                {"error": str(e), "packets": [], "latest_id": 0, "count": 0}
+            ),
+            500,
+        )
+
+
 def safe_jsonify(data, *args, **kwargs):
+
     """
     A drop-in replacement for Flask's jsonify() that sanitizes NaN/Inf values.
 
