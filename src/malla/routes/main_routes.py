@@ -55,6 +55,17 @@ def map_view():
         return f"Map error: {e}", 500
 
 
+@main_bp.route("/live-map")
+def live_map():
+    """Live map with real-time packet flow animations and replay."""
+    try:
+        return render_template("live_map.html")
+    except Exception as e:
+        logger.error(f"Error in live map route: {e}")
+        return f"Live map error: {e}", 500
+
+
+
 @main_bp.route("/longest-links")
 def longest_links():
     """Longest links analysis page."""

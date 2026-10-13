@@ -123,6 +123,14 @@
                         </a>
                     </li>
 
+                    <!-- Live Map -->
+                    <li class="nav-item">
+                        <a class="nav-link {{ 'active' if request.endpoint == 'main.live_map' }}" href="{{ url_for('main.live_map') }}">
+                            <i class="bi bi-broadcast"></i> Live Map
+                        </a>
+                    </li>
+
+
                     <!-- Network Graph -->
                     <li class="nav-item">
                         <a class="nav-link {{ 'active' if request.endpoint == 'traceroute.traceroute_graph' }}" href="{{ url_for('traceroute.traceroute_graph') }}">
