@@ -675,7 +675,7 @@
         let duration = 950;
         if (opts.pathType === 'arc_unknown') duration = 1050;
         else if (opts.pathType === 'relay') duration = 1250;
-        else if (opts.pathType === 'traceroute') duration = Math.max(900, (opts.pathCoords ? opts.pathCoords.length : 2) * 350);
+        else if (opts.pathType === 'traceroute') duration = Math.max(900, (opts.pathPoints ? opts.pathPoints.length : 2) * 450);
 
         const flight = {
             id: 'flight_' + Math.random().toString(36).slice(2, 9),
@@ -685,10 +685,12 @@
             hopsAway: opts.hopsAway || 0,
             relayInfo: opts.relayInfo || null,
             tracerouteHops: opts.tracerouteHops || null,
+            pathPoints: opts.pathPoints || null,
+            hopsFired: new Set(),
             color: opts.color || '#00f2fe',
             startTime: performance.now(),
             duration: duration,
-            fadeDuration: 1800, // ghost trail lingering fade
+            fadeDuration: 2200, // ghost trail lingering fade
             onArrival: opts.onArrival || null,
             arrivalTriggered: false,
             relayPulseFired: false
@@ -818,7 +820,89 @@
         }
 
         // ==========================================
-        // 2. Multi-Segment (1-Hop Relay)
+        // 2. Traceroute (Multi-Hop Exact Route Sequence)
+        // ==========================================
+        if (f.pathType === 'traceroute' && f.pathPoints && f.pathPoints.length >= 2) {
+            const pts = f.pathPoints;
+            const screenPts = pts.map(p => map.latLngToContainerPoint([p.lat, p.lng]));
+
+            // Full faint route polyline with dashed dots
+            ctx.save();
+            ctx.strokeStyle = f.color;
+            ctx.lineWidth = 1.8;
+            ctx.globalAlpha = 0.28 * fadeAlpha;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(screenPts[0].x, screenPts[0].y);
+            for (let i = 1; i < screenPts.length; i++) {
+                ctx.lineTo(screenPts[i].x, screenPts[i].y);
+            }
+            ctx.stroke();
+            ctx.restore();
+
+            const numSegments = screenPts.length - 1;
+            const segFraction = 1.0 / numSegments;
+            const currentSegIndex = Math.min(numSegments - 1, Math.floor(t / segFraction));
+            const u = (t - currentSegIndex * segFraction) / segFraction;
+
+            // Trigger pulses on intermediate hops as particle arrives at each node!
+            for (let i = 1; i <= currentSegIndex; i++) {
+                if (!f.hopsFired.has(i)) {
+                    f.hopsFired.add(i);
+                    const hopNodeId = pts[i].nodeId;
+                    if (hopNodeId && nodeMarkersMap.has(hopNodeId)) {
+                        triggerMarkerPulse(nodeMarkersMap.get(hopNodeId).marker, '#06b6d4', 36, false);
+                    }
+                }
+            }
+
+            // Draw traveled path so far (solid luminous beam)
+            ctx.save();
+            ctx.strokeStyle = f.color;
+            ctx.shadowColor = f.color;
+            ctx.shadowBlur = 12;
+            ctx.lineWidth = 2.8;
+            ctx.globalAlpha = (t < 1 ? 0.95 : 0.75) * fadeAlpha;
+            ctx.beginPath();
+            ctx.moveTo(screenPts[0].x, screenPts[0].y);
+            for (let i = 1; i <= currentSegIndex; i++) {
+                ctx.lineTo(screenPts[i].x, screenPts[i].y);
+            }
+
+            // Interpolate position along current active segment
+            const pA = screenPts[currentSegIndex];
+            const pB = screenPts[currentSegIndex + 1];
+            const currX = pA.x + (pB.x - pA.x) * u;
+            const currY = pA.y + (pB.y - pA.y) * u;
+
+            if (t < 1) {
+                ctx.lineTo(currX, currY);
+            } else {
+                ctx.lineTo(screenPts[numSegments].x, screenPts[numSegments].y);
+            }
+            ctx.stroke();
+            ctx.restore();
+
+            // Flying comet particle
+            if (t < 1) {
+                drawCometHead(ctx, currX, currY, f.color);
+
+                // Trailing sparks along current segment
+                for (let k = 1; k <= 4; k++) {
+                    const tailU = Math.max(0, u - k * 0.05);
+                    const tx = pA.x + (pB.x - pA.x) * tailU;
+                    const ty = pA.y + (pB.y - pA.y) * tailU;
+                    drawSpark(ctx, tx, ty, f.color, (1 - k * 0.22));
+                }
+            } else {
+                const finalPt = screenPts[numSegments];
+                drawArrivalSpark(ctx, finalPt.x, finalPt.y, f.color, fadeAlpha);
+            }
+            return;
+        }
+
+        // ==========================================
+        // 3. Multi-Segment (1-Hop Relay)
         // ==========================================
         if (f.pathType === 'relay' && f.relayInfo && f.relayInfo.location) {
             const rLoc = f.relayInfo.location;
@@ -1259,18 +1343,72 @@
         }
 
         // 3. Launch Canvas Particle Flights for each receiving gateway
-        if (pkt.from_location && pkt.receptions && pkt.receptions.length > 0) {
+        const fromLoc = pkt.from_location || (pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id) ? {
+            latitude: nodeMarkersMap.get(pkt.from_node_id).lat,
+            longitude: nodeMarkersMap.get(pkt.from_node_id).lng
+        } : null);
+
+        if (fromLoc && pkt.receptions && pkt.receptions.length > 0) {
             pkt.receptions.forEach(rec => {
-                if (!rec.gateway_location) return;
+                const gwLoc = rec.gateway_location || (rec.gateway_node_id && nodeMarkersMap.has(rec.gateway_node_id) ? {
+                    latitude: nodeMarkersMap.get(rec.gateway_node_id).lat,
+                    longitude: nodeMarkersMap.get(rec.gateway_node_id).lng
+                } : null);
+
+                if (!gwLoc) return;
+
+                // For traceroute: construct full sequence of points
+                let pathPoints = null;
+                if (rec.path_type === 'traceroute') {
+                    pathPoints = [{ lat: fromLoc.latitude, lng: fromLoc.longitude, nodeId: pkt.from_node_id }];
+
+                    if (rec.traceroute_hops && rec.traceroute_hops.length > 0) {
+                        rec.traceroute_hops.forEach(hop => {
+                            let hLat = hop.latitude;
+                            let hLng = hop.longitude;
+                            if ((hLat == null || hLng == null) && nodeMarkersMap.has(hop.node_id)) {
+                                hLat = nodeMarkersMap.get(hop.node_id).lat;
+                                hLng = nodeMarkersMap.get(hop.node_id).lng;
+                            }
+                            if (hLat != null && hLng != null) {
+                                pathPoints.push({ lat: hLat, lng: hLng, nodeId: hop.node_id });
+                            }
+                        });
+                    }
+
+                    // Target destination or gateway
+                    const toId = pkt.to_node_id;
+                    if (toId && toId !== 0xFFFFFFFF && nodeMarkersMap.has(toId)) {
+                        const targetMarker = nodeMarkersMap.get(toId);
+                        pathPoints.push({ lat: targetMarker.lat, lng: targetMarker.lng, nodeId: toId });
+                    } else {
+                        pathPoints.push({ lat: gwLoc.latitude, lng: gwLoc.longitude, nodeId: rec.gateway_node_id });
+                    }
+                }
+
+                // For 1-hop relay: resolve relay coordinates if missing
+                let relayInfo = rec.relay_info;
+                if (rec.path_type === 'relay') {
+                    if (!relayInfo && rec.relay_candidate) {
+                        relayInfo = rec.relay_candidate;
+                    }
+                    if (relayInfo && (!relayInfo.location || !relayInfo.location.latitude) && nodeMarkersMap.has(relayInfo.node_id)) {
+                        relayInfo.location = {
+                            latitude: nodeMarkersMap.get(relayInfo.node_id).lat,
+                            longitude: nodeMarkersMap.get(relayInfo.node_id).lng
+                        };
+                    }
+                }
 
                 launchPacketFlight({
-                    fromLoc: pkt.from_location,
-                    toLoc: rec.gateway_location,
+                    fromLoc: fromLoc,
+                    toLoc: gwLoc,
                     gatewayNodeId: rec.gateway_node_id,
                     pathType: rec.path_type || 'direct',
                     hopsAway: rec.hops_away != null ? rec.hops_away : 0,
-                    relayInfo: rec.relay_info,
+                    relayInfo: relayInfo,
                     tracerouteHops: rec.traceroute_hops,
+                    pathPoints: pathPoints,
                     color: pktColor,
                     onArrival: () => {
                         // Gateway reception shockwave pulse upon packet arrival!

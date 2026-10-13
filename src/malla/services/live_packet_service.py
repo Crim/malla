@@ -241,32 +241,35 @@ class LivePacketService:
                 relay_info: dict[str, Any] | None = None
                 traceroute_hops: list[dict[str, Any]] = []
 
-                if from_loc is not None and gw_loc is not None:
-                    # 1. Traceroute
-                    if r["portnum"] == 70 or r["portnum_name"] == "ROUTING_APP":
-                        path_type = "traceroute"
+                # 1. Traceroute (ROUTING_APP)
+                if r["portnum"] == 70 or r["portnum_name"] == "ROUTING_APP":
+                    path_type = "traceroute"
+                    if from_loc:
                         path_coords.append([from_loc[0], from_loc[1]])
-                        if r["raw_payload"]:
-                            try:
-                                r_data = parse_traceroute_payload(r["raw_payload"])
-                                for hop_id in r_data.get("route_nodes", []):
-                                    hop_loc = loc_cache.get(hop_id)
-                                    hop_name = node_names.get(hop_id, f"!{hop_id:08x}")
-                                    traceroute_hops.append({
-                                        "node_id": hop_id,
-                                        "hex_id": f"!{hop_id:08x}",
-                                        "name": hop_name,
-                                        "latitude": hop_loc[0] if hop_loc else None,
-                                        "longitude": hop_loc[1] if hop_loc else None,
-                                    })
-                                    if hop_loc:
-                                        path_coords.append([hop_loc[0], hop_loc[1]])
-                            except Exception:
-                                pass
+                    if r["raw_payload"]:
+                        try:
+                            r_data = parse_traceroute_payload(r["raw_payload"])
+                            hop_ids = r_data.get("route_nodes", []) or r_data.get("route_back", [])
+                            for hop_id in hop_ids:
+                                hop_loc = loc_cache.get(hop_id)
+                                hop_name = node_names.get(hop_id, f"!{hop_id:08x}")
+                                traceroute_hops.append({
+                                    "node_id": hop_id,
+                                    "hex_id": f"!{hop_id:08x}",
+                                    "name": hop_name,
+                                    "latitude": hop_loc[0] if hop_loc else None,
+                                    "longitude": hop_loc[1] if hop_loc else None,
+                                })
+                                if hop_loc:
+                                    path_coords.append([hop_loc[0], hop_loc[1]])
+                        except Exception:
+                            pass
+                    if gw_loc:
                         path_coords.append([gw_loc[0], gw_loc[1]])
 
+                elif from_loc is not None and gw_loc is not None:
                     # 2. Direct RF reception (0 hops)
-                    elif hops_away == 0:
+                    if hops_away == 0:
                         path_type = "direct"
                         path_coords = [
                             [from_loc[0], from_loc[1]],
