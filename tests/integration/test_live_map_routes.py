@@ -68,7 +68,7 @@ class TestLivePacketsAPI:
                 assert "hops_away" in rec
                 assert "path_type" in rec
                 assert "path_coords" in rec
-                assert rec["path_type"] in ("direct", "relay", "traceroute", "arc_unknown", "unlocated")
+                assert rec["path_type"] in ("direct", "relay", "multi_hop_relay", "traceroute", "arc_unknown", "unlocated")
 
     @pytest.mark.integration
     def test_live_packets_pagination_after_id(self, client):

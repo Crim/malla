@@ -170,7 +170,7 @@ class LivePacketService:
                     hop_start = r["hop_start"] or 0
                     hop_limit = r["hop_limit"] or 0
                     hops_away = hop_start - hop_limit
-                    if hops_away == 1 and r["relay_node"] and r["relay_node"] != 0:
+                    if hops_away >= 1 and r["relay_node"] and r["relay_node"] != 0:
                         relay_pairs.append((gw_int, r["relay_node"] & 0xFF))
 
         # Look up bulk names
@@ -284,27 +284,48 @@ class LivePacketService:
                             cand = gw_candidates[0]
                             cand_id = cand.get("node_id")
                             cand_loc = loc_cache.get(cand_id) if cand_id is not None else None
-                            if cand_id and cand_loc:
-                                path_type = "relay"
-                                path_coords = [
-                                    [from_loc[0], from_loc[1]],
-                                    [cand_loc[0], cand_loc[1]],
-                                    [gw_loc[0], gw_loc[1]],
-                                ]
-                                relay_info = {
-                                    "node_id": cand_id,
-                                    "hex_id": cand.get("hex_id", f"!{cand_id:08x}"),
-                                    "name": cand.get("long_name") or cand.get("short_name") or f"!{cand_id:08x}",
-                                    "location": {"latitude": cand_loc[0], "longitude": cand_loc[1]},
-                                }
-                            else:
-                                path_type = "arc_unknown"
-                                path_coords = [[from_loc[0], from_loc[1]], [gw_loc[0], gw_loc[1]]]
+                            path_type = "relay"
+                            path_coords = [
+                                [from_loc[0], from_loc[1]],
+                                [cand_loc[0], cand_loc[1]] if cand_loc else [],
+                                [gw_loc[0], gw_loc[1]],
+                            ]
+                            relay_info = {
+                                "node_id": cand_id,
+                                "hex_id": cand.get("hex_id", f"!{cand_id:08x}"),
+                                "name": cand.get("long_name") or cand.get("short_name") or f"!{cand_id:08x}",
+                                "location": {"latitude": cand_loc[0], "longitude": cand_loc[1]} if cand_loc else None,
+                            }
                         else:
                             path_type = "arc_unknown"
                             path_coords = [[from_loc[0], from_loc[1]], [gw_loc[0], gw_loc[1]]]
 
-                    # 4. Multi-hop unknown intermediate (>= 2 hops or unresolved relay)
+                    # 4. Multi-hop (hops_away >= 2) with identified last relay candidate
+                    elif hops_away >= 2 and r["relay_node"] and r["relay_node"] != 0 and gw_int is not None:
+                        relay_last_byte = r["relay_node"] & 0xFF
+                        gw_candidates = candidates_by_pair.get(gw_int, {}).get(relay_last_byte, [])
+                        if len(gw_candidates) == 1:
+                            cand = gw_candidates[0]
+                            cand_id = cand.get("node_id")
+                            cand_loc = loc_cache.get(cand_id) if cand_id is not None else None
+                            path_type = "multi_hop_relay"
+                            path_coords = [
+                                [from_loc[0], from_loc[1]],
+                                [cand_loc[0], cand_loc[1]] if cand_loc else [],
+                                [gw_loc[0], gw_loc[1]],
+                            ]
+                            relay_info = {
+                                "node_id": cand_id,
+                                "hex_id": cand.get("hex_id", f"!{cand_id:08x}"),
+                                "name": cand.get("long_name") or cand.get("short_name") or f"!{cand_id:08x}",
+                                "location": {"latitude": cand_loc[0], "longitude": cand_loc[1]} if cand_loc else None,
+                                "remaining_hops": hops_away - 1,
+                            }
+                        else:
+                            path_type = "arc_unknown"
+                            path_coords = [[from_loc[0], from_loc[1]], [gw_loc[0], gw_loc[1]]]
+
+                    # 5. Multi-hop unknown intermediate (>= 2 hops or unresolved relay)
                     else:
                         path_type = "arc_unknown"
                         path_coords = [

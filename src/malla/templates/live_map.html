@@ -336,11 +336,10 @@
                 <button class="btn btn-sm btn-outline-primary" id="playPauseBtn" title="Pause / Resume Live Feed">
                     <i class="bi bi-pause-fill" id="playPauseIcon"></i>
                 </button>
-                <div class="btn-group btn-group-sm" role="group" aria-label="Playback speed">
-                    <button type="button" class="btn btn-outline-secondary active">1x</button>
-                    <button type="button" class="btn btn-outline-secondary">5x</button>
-                    <button type="button" class="btn btn-outline-secondary">15x</button>
-                    <button type="button" class="btn btn-outline-secondary">60x</button>
+                <div class="btn-group btn-group-sm" role="group" id="playbackSpeedGroup" aria-label="Playback speed">
+                    <button type="button" class="btn btn-outline-secondary" data-speed="0.5">0.5x</button>
+                    <button type="button" class="btn btn-outline-secondary active" data-speed="1.0">1x</button>
+                    <button type="button" class="btn btn-outline-secondary" data-speed="2.0">2x</button>
                 </div>
             </div>
 
@@ -668,14 +667,20 @@
         return '#38bdf8';                                 // Sky Blue
     }
 
+    let animationSpeedMultiplier = 1.0;
+
     function launchPacketFlight(opts) {
         if (!map || !opts.fromLoc || !opts.toLoc) return;
 
-        // Base flight duration
-        let duration = 950;
-        if (opts.pathType === 'arc_unknown') duration = 1050;
-        else if (opts.pathType === 'relay') duration = 1250;
-        else if (opts.pathType === 'traceroute') duration = Math.max(900, (opts.pathPoints ? opts.pathPoints.length : 2) * 450);
+        // Base flight durations (slowed down for clear, readable observation)
+        let baseDuration = 1800; // direct RF beam
+        if (opts.pathType === 'arc_unknown') baseDuration = 2200;
+        else if (opts.pathType === 'relay') baseDuration = 2600;
+        else if (opts.pathType === 'multi_hop_relay') baseDuration = 2800;
+        else if (opts.pathType === 'traceroute') baseDuration = Math.max(1600, (opts.pathPoints ? opts.pathPoints.length : 2) * 850);
+
+        const duration = Math.round(baseDuration / animationSpeedMultiplier);
+        const fadeDuration = Math.round(4200 / animationSpeedMultiplier);
 
         const flight = {
             id: 'flight_' + Math.random().toString(36).slice(2, 9),
@@ -690,7 +695,7 @@
             color: opts.color || '#00f2fe',
             startTime: performance.now(),
             duration: duration,
-            fadeDuration: 2200, // ghost trail lingering fade
+            fadeDuration: fadeDuration, // ghost trail lingering fade
             onArrival: opts.onArrival || null,
             arrivalTriggered: false,
             relayPulseFired: false
@@ -975,7 +980,137 @@
         }
 
         // ==========================================
-        // 3. Direct RF (0 Hops) & Default Straight Path
+        // 4. Multi-Hop with Known Last Relay (multi_hop_relay)
+        // ==========================================
+        if (f.pathType === 'multi_hop_relay' && f.relayInfo && f.relayInfo.location) {
+            const rLoc = f.relayInfo.location;
+            const sR = map.latLngToContainerPoint([rLoc.latitude, rLoc.longitude]);
+
+            // Arc for Leg 1 (Sender -> Relay)
+            const dxArc = sR.x - s0.x;
+            const dyArc = sR.y - s0.y;
+            const distArc = Math.hypot(dxArc, dyArc);
+            const mxArc = (s0.x + sR.x) / 2;
+            const myArc = (s0.y + sR.y) / 2;
+            const nxArc = distArc > 4 ? -dyArc / distArc : 0;
+            const nyArc = distArc > 4 ? dxArc / distArc : 0;
+            const offsetArc = Math.min(65, Math.max(25, distArc * 0.22));
+            const cxArc = mxArc + nxArc * offsetArc;
+            const cyArc = myArc + nyArc * offsetArc;
+
+            // Faint guide paths (curved arc for leg 1, straight for leg 2)
+            ctx.save();
+            ctx.strokeStyle = f.color;
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = 0.25 * fadeAlpha;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(s0.x, s0.y);
+            ctx.quadraticCurveTo(cxArc, cyArc, sR.x, sR.y);
+            ctx.lineTo(s1.x, s1.y);
+            ctx.stroke();
+            ctx.restore();
+
+            // Leg 1: Sender -> Relay (curved arc, t: 0..0.58)
+            // Leg 2: Relay -> Gateway (direct RF beam, t: 0.58..1.0)
+            const splitT = 0.58;
+
+            if (t < splitT) {
+                const u = t / splitT;
+                ctx.save();
+                ctx.strokeStyle = f.color;
+                ctx.shadowColor = f.color;
+                ctx.shadowBlur = 10;
+                ctx.lineWidth = 2.6;
+                ctx.globalAlpha = 0.95 * fadeAlpha;
+                ctx.beginPath();
+                ctx.moveTo(s0.x, s0.y);
+                const steps = 20;
+                const maxStep = Math.max(1, Math.round(u * steps));
+                for (let i = 1; i <= maxStep; i++) {
+                    const stepU = i / steps;
+                    const qx = (1 - stepU) * (1 - stepU) * s0.x + 2 * (1 - stepU) * stepU * cxArc + stepU * stepU * sR.x;
+                    const qy = (1 - stepU) * (1 - stepU) * s0.y + 2 * (1 - stepU) * stepU * cyArc + stepU * stepU * sR.y;
+                    ctx.lineTo(qx, qy);
+                }
+                ctx.stroke();
+                ctx.restore();
+
+                const remHops = (f.relayInfo && f.relayInfo.remaining_hops) ? f.relayInfo.remaining_hops : Math.max(1, f.hopsAway - 1);
+                const hx = 0.25 * s0.x + 0.5 * cxArc + 0.25 * sR.x;
+                const hy = 0.25 * s0.y + 0.5 * cyArc + 0.25 * sR.y;
+                drawHopBadge(ctx, hx, hy, `${remHops}h`, f.color, fadeAlpha);
+
+                const currX = (1 - u) * (1 - u) * s0.x + 2 * (1 - u) * u * cxArc + u * u * sR.x;
+                const currY = (1 - u) * (1 - u) * s0.y + 2 * (1 - u) * u * cyArc + u * u * sR.y;
+                drawCometHead(ctx, currX, currY, f.color);
+
+                for (let k = 1; k <= 4; k++) {
+                    const tailU = Math.max(0, u - k * 0.04);
+                    const tx = (1 - tailU) * (1 - tailU) * s0.x + 2 * (1 - tailU) * tailU * cxArc + tailU * tailU * sR.x;
+                    const ty = (1 - tailU) * (1 - tailU) * s0.y + 2 * (1 - tailU) * tailU * cyArc + tailU * tailU * sR.y;
+                    drawSpark(ctx, tx, ty, f.color, (1 - k * 0.22));
+                }
+            } else {
+                if (!f.relayPulseFired) {
+                    f.relayPulseFired = true;
+                    if (f.relayInfo.node_id && nodeMarkersMap.has(f.relayInfo.node_id)) {
+                        triggerMarkerPulse(nodeMarkersMap.get(f.relayInfo.node_id).marker, '#f59e0b', 36, false);
+                    }
+                }
+
+                // Full arc remains drawn
+                ctx.save();
+                ctx.strokeStyle = f.color;
+                ctx.shadowColor = f.color;
+                ctx.shadowBlur = 10;
+                ctx.lineWidth = 2.6;
+                ctx.globalAlpha = (t < 1 ? 0.9 : 0.7) * fadeAlpha;
+                ctx.beginPath();
+                ctx.moveTo(s0.x, s0.y);
+                ctx.quadraticCurveTo(cxArc, cyArc, sR.x, sR.y);
+                ctx.stroke();
+                ctx.restore();
+
+                const remHops = (f.relayInfo && f.relayInfo.remaining_hops) ? f.relayInfo.remaining_hops : Math.max(1, f.hopsAway - 1);
+                const hx = 0.25 * s0.x + 0.5 * cxArc + 0.25 * sR.x;
+                const hy = 0.25 * s0.y + 0.5 * cyArc + 0.25 * sR.y;
+                drawHopBadge(ctx, hx, hy, `${remHops}h`, f.color, fadeAlpha);
+
+                // Leg 2: Direct RF beam from Relay -> Gateway
+                const u = (t - splitT) / (1 - splitT);
+                const currX = sR.x + (s1.x - sR.x) * u;
+                const currY = sR.y + (s1.y - sR.y) * u;
+
+                ctx.save();
+                ctx.strokeStyle = f.color;
+                ctx.shadowColor = f.color;
+                ctx.shadowBlur = 10;
+                ctx.lineWidth = 2.6;
+                ctx.globalAlpha = (t < 1 ? 0.95 : 0.7) * fadeAlpha;
+                ctx.beginPath();
+                ctx.moveTo(sR.x, sR.y);
+                ctx.lineTo(t < 1 ? currX : s1.x, t < 1 ? currY : s1.y);
+                ctx.stroke();
+                ctx.restore();
+
+                if (t < 1) {
+                    drawCometHead(ctx, currX, currY, f.color);
+                    for (let k = 1; k <= 4; k++) {
+                        const tailU = Math.max(0, u - k * 0.04);
+                        const tx = sR.x + (s1.x - sR.x) * tailU;
+                        const ty = sR.y + (s1.y - sR.y) * tailU;
+                        drawSpark(ctx, tx, ty, f.color, (1 - k * 0.22));
+                    }
+                } else {
+                    drawArrivalSpark(ctx, s1.x, s1.y, f.color, fadeAlpha);
+                }
+            }
+            return;
+        }
+
+        // ==========================================
+        // 5. Direct RF (0 Hops) & Default Straight Path
         // ==========================================
         const dx = s1.x - s0.x;
         const dy = s1.y - s0.y;
@@ -1174,7 +1309,7 @@
                     marker.setRadius(origRadius);
                     marker.setStyle({ weight: origWeight });
                 }
-            }, 220);
+            }, Math.round(300 / animationSpeedMultiplier));
         } catch (e) {}
 
         // 2. Double-shockwave ripple rings
@@ -1193,8 +1328,10 @@
 
                 let currentRadius = 7;
                 let currentOpacity = startOpacity;
-                const stepRadius = (targetRadius - 7) / 18;
-                const stepOpacity = startOpacity / 18;
+                const totalSteps = 28;
+                const stepRadius = (targetRadius - 7) / totalSteps;
+                const stepOpacity = startOpacity / totalSteps;
+                const stepDelay = Math.max(16, Math.round(28 / animationSpeedMultiplier));
 
                 const interval = setInterval(() => {
                     currentRadius += stepRadius;
@@ -1210,12 +1347,12 @@
                             fillOpacity: Math.max(0, currentOpacity * 0.35)
                         });
                     }
-                }, 25);
-            }, delayMs);
+                }, stepDelay);
+            }, Math.round(delayMs / animationSpeedMultiplier));
         }
 
         launchRing(0, maxRadius, 3.5, 0.95);
-        launchRing(80, Math.round(maxRadius * 0.72), 2.2, 0.75);
+        launchRing(100, Math.round(maxRadius * 0.72), 2.2, 0.75);
     }
 
     function updateActiveNodesBadge() {
@@ -1305,8 +1442,9 @@
             const pkt = packetQueue.shift();
             playSinglePacket(pkt);
 
-            // Adaptive pacing: 260ms normal, down to 55ms during bursts
-            const delay = packetQueue.length > 6 ? 55 : (packetQueue.length > 2 ? 130 : 260);
+            // Adaptive pacing: 500ms normal, down to 100ms during bursts, scaled by speed
+            const baseDelay = packetQueue.length > 8 ? 100 : (packetQueue.length > 3 ? 240 : 500);
+            const delay = Math.round(baseDelay / animationSpeedMultiplier);
             queueTimeout = setTimeout(next, delay);
         }
 
@@ -1601,6 +1739,20 @@
     if (playPauseBtn) {
         playPauseBtn.addEventListener('click', () => {
             if (streamProvider) streamProvider.togglePause();
+        });
+    }
+
+    const playbackSpeedGroup = document.getElementById('playbackSpeedGroup');
+    if (playbackSpeedGroup) {
+        playbackSpeedGroup.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-speed]');
+            if (!btn) return;
+            const speed = parseFloat(btn.dataset.speed);
+            if (!isNaN(speed) && speed > 0) {
+                animationSpeedMultiplier = speed;
+                playbackSpeedGroup.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            }
         });
     }
 
