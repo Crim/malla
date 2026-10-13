@@ -135,6 +135,93 @@ class LivePacketService:
                 "count": 0,
             }
 
+        output_packets = cls._process_packet_rows(rows, loc_cache, include_unlocated)
+        latest_batch_id = max(r["id"] for r in rows)
+        effective_latest_id = max(global_latest_id, latest_batch_id)
+
+        return {
+            "packets": output_packets,
+            "latest_id": effective_latest_id,
+            "count": len(output_packets),
+        }
+
+    @classmethod
+    def get_historical_packets(
+        cls,
+        start_time: float,
+        end_time: float,
+        limit: int = 500,
+        include_unlocated: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Fetch historical packets within [start_time, end_time] ordered chronologically.
+
+        Args:
+            start_time: Start unix timestamp (seconds).
+            end_time: End unix timestamp (seconds).
+            limit: Maximum packets to retrieve (clamped to 1..2000).
+            include_unlocated: If True, include packets where sender/gateway lack coordinates.
+
+        Returns:
+            Dictionary with:
+              - 'packets': List of grouped packet objects ready for map animation & feed.
+              - 'start_time': Query start timestamp.
+              - 'end_time': Query end timestamp.
+              - 'count': Number of packets returned.
+        """
+        limit = max(1, min(2000, int(limit)))
+        loc_cache = cls.get_known_node_locations()
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            query = """
+                SELECT
+                    id, timestamp, mesh_packet_id, from_node_id, to_node_id,
+                    portnum, portnum_name, gateway_id, channel_id, rssi, snr,
+                    hop_start, hop_limit, relay_node, rx_time, raw_payload
+                FROM packet_history
+                WHERE timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp ASC, id ASC
+                LIMIT ?
+            """
+            cursor.execute(query, (start_time, end_time, limit))
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        if not rows:
+            return {
+                "packets": [],
+                "start_time": start_time,
+                "end_time": end_time,
+                "count": 0,
+            }
+
+        output_packets = cls._process_packet_rows(rows, loc_cache, include_unlocated)
+
+        return {
+            "packets": output_packets,
+            "start_time": start_time,
+            "end_time": end_time,
+            "count": len(output_packets),
+        }
+
+    @classmethod
+    def _process_packet_rows(
+        cls,
+        rows: list[Any],
+        loc_cache: dict[int, tuple[float, float]],
+        include_unlocated: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        Transform raw database packet rows into structured packet objects with
+        resolved geospatial reception paths, relay candidate inferences, and traceroutes.
+        """
+        if not rows:
+            return []
+
         # -------------------------------------------------------------
         # 1. Update location cache dynamically if any position packets exist in batch
         # -------------------------------------------------------------
@@ -381,12 +468,5 @@ class LivePacketService:
                 "gateway_count": len(receptions),
                 "text_preview": text_preview,
             })
+        return output_packets
 
-        latest_batch_id = max(r["id"] for r in rows)
-        effective_latest_id = max(global_latest_id, latest_batch_id)
-
-        return {
-            "packets": output_packets,
-            "latest_id": effective_latest_id,
-            "count": len(output_packets),
-        }

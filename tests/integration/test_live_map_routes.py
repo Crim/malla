@@ -17,6 +17,9 @@ class TestLiveMapRoutes:
         assert b"live-status-pill" in response.data
         assert b"packetInspectorCard" in response.data
         assert b"feedFilterPills" in response.data
+        assert b"vcrSlider" in response.data
+        assert b"jumpToLiveBtn" in response.data
+        assert b"vcrRangeGroup" in response.data
 
     @pytest.mark.integration
     def test_live_map_in_navbar(self, client):
@@ -103,4 +106,76 @@ class TestLivePacketsAPI:
         assert response.status_code == 204
         assert response.data == b""
         assert "no-cache" in response.headers.get("Cache-Control", "")
+
+
+class TestLiveHistoryAPI:
+    """Test /api/live/history endpoint functionality."""
+
+    @pytest.mark.integration
+    def test_live_history_missing_params(self, client):
+        """Test that missing start_time or end_time returns HTTP 400."""
+        response = client.get("/api/live/history")
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+        response_partial = client.get("/api/live/history?start_time=1000")
+        assert response_partial.status_code == 400
+
+    @pytest.mark.integration
+    def test_live_history_invalid_timestamps(self, client):
+        """Test that non-numeric timestamps return HTTP 400."""
+        response = client.get("/api/live/history?start_time=abc&end_time=xyz")
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+    @pytest.mark.integration
+    def test_live_history_inverted_range(self, client):
+        """Test that start_time > end_time returns HTTP 400."""
+        response = client.get("/api/live/history?start_time=5000&end_time=1000")
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+    @pytest.mark.integration
+    def test_live_history_valid_query_structure(self, client):
+        """Test that /api/live/history returns expected response structure."""
+        response = client.get("/api/live/history?start_time=0&end_time=2500000000&limit=50")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "packets" in data
+        assert "start_time" in data
+        assert "end_time" in data
+        assert "count" in data
+        assert isinstance(data["packets"], list)
+        assert data["count"] == len(data["packets"])
+
+    @pytest.mark.integration
+    def test_live_history_limit_clamping(self, client):
+        """Test that limit parameter is parsed and bounded without error."""
+        response = client.get("/api/live/history?start_time=0&end_time=2500000000&limit=5000")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["count"] <= 2000
+
+    @pytest.mark.integration
+    def test_live_history_fields(self, client):
+        """Test that historical packets contain required route and geometry fields."""
+        response = client.get("/api/live/history?start_time=0&end_time=2500000000&limit=10")
+        assert response.status_code == 200
+        data = response.get_json()
+        if data["count"] > 0:
+            pkt = data["packets"][0]
+            assert "id" in pkt
+            assert "timestamp" in pkt
+            assert "from_node_id" in pkt
+            assert "receptions" in pkt
+            assert isinstance(pkt["receptions"], list)
+            if len(pkt["receptions"]) > 0:
+                rec = pkt["receptions"][0]
+                assert "gateway_id" in rec
+                assert "path_type" in rec
+                assert "path_coords" in rec
+
 

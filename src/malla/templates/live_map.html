@@ -268,14 +268,14 @@
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
     border-radius: 10px;
-    padding: 0.6rem 1rem;
+    padding: 0.5rem 0.85rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12);
     z-index: 850;
     backdrop-filter: blur(8px);
-    background-color: rgba(var(--bs-body-bg-rgb), 0.92);
+    background-color: rgba(var(--bs-body-bg-rgb), 0.94);
     transition: right 0.25s ease;
 }
 
@@ -284,13 +284,73 @@
     right: 16px;
 }
 
+.live-status-pill.replay {
+    background: rgba(13, 110, 253, 0.15);
+    color: var(--bs-primary);
+    border-color: rgba(13, 110, 253, 0.35);
+}
+
+.live-status-pill.replay .pulse-dot {
+    background-color: var(--bs-primary);
+    animation: live-pulse-replay 1.6s infinite ease-in-out;
+}
+
+.live-status-pill.replay-paused {
+    background: rgba(255, 193, 7, 0.15);
+    color: var(--bs-warning-text, #997404);
+    border-color: rgba(255, 193, 7, 0.35);
+}
+
+.live-status-pill.replay-paused .pulse-dot {
+    background-color: var(--bs-warning);
+    animation: none;
+}
+
+@keyframes live-pulse-replay {
+    0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.7); }
+    70% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 0 6px rgba(13, 110, 253, 0); }
+    100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(13, 110, 253, 0); }
+}
+
+.vcr-scrubber-section {
+    min-width: 180px;
+}
+
+.vcr-slider-container {
+    min-width: 100px;
+}
+
+.vcr-slider {
+    cursor: pointer;
+    margin: 0;
+}
+
+.vcr-time-display {
+    min-width: 110px;
+    text-align: center;
+    letter-spacing: -0.3px;
+    font-size: 0.74rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 992px) {
+    .live-control-bar {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .vcr-scrubber-section {
+        order: 3;
+        width: 100%;
+        margin: 0 !important;
+    }
+}
+
 @media (max-width: 768px) {
     .live-control-bar {
         right: 16px;
         bottom: 8px;
         left: 8px;
-        flex-wrap: wrap;
-        gap: 0.5rem;
+        padding: 0.45rem 0.65rem;
     }
 }
 
@@ -487,33 +547,48 @@
         </div>
 
         <!-- Bottom Playback Control Bar -->
-        <div class="live-control-bar">
-            <!-- Left Info -->
-            <div class="d-flex align-items-center gap-2">
+        <div class="live-control-bar" id="liveControlBar">
+            <!-- Left Info & Mode Controls -->
+            <div class="d-flex align-items-center gap-2 flex-shrink-0">
                 <span class="live-status-pill" id="liveStatusPill">
                     <span class="pulse-dot"></span>
                     <span id="liveStatusText">LIVE</span>
                 </span>
-                <span class="badge text-bg-secondary" id="activeNodesBadge">0 nodes</span>
-                <span class="small text-muted d-none d-md-inline" id="packetRateBadge">0 pkts/min</span>
+                <button class="btn btn-xs btn-outline-success fw-bold d-none" id="jumpToLiveBtn" title="Return to Live Real-Time Stream">
+                    <i class="bi bi-broadcast"></i> Jump to Live
+                </button>
+                <span class="badge text-bg-secondary d-none d-xl-inline-block" id="activeNodesBadge">0 nodes</span>
+                <span class="small text-muted d-none d-xxl-inline-block" id="packetRateBadge">0 pkts/min</span>
             </div>
 
-            <!-- Center Controls (Replay / VCR Scaffold) -->
-            <div class="d-flex align-items-center gap-2">
-                <button class="btn btn-sm btn-outline-primary" id="playPauseBtn" title="Pause / Resume Live Feed">
+            <!-- Center Controls: Play/Pause, Scrubber Track & Time Readout -->
+            <div class="vcr-scrubber-section d-flex align-items-center gap-2 flex-grow-1 mx-2 mx-md-3">
+                <button class="btn btn-sm btn-outline-primary flex-shrink-0" id="playPauseBtn" title="Play / Pause">
                     <i class="bi bi-pause-fill" id="playPauseIcon"></i>
                 </button>
-                <div class="btn-group btn-group-sm" role="group" id="playbackSpeedGroup" aria-label="Playback speed">
-                    <button type="button" class="btn btn-outline-secondary" data-speed="0.5">0.5x</button>
-                    <button type="button" class="btn btn-outline-secondary active" data-speed="1.0">1x</button>
-                    <button type="button" class="btn btn-outline-secondary" data-speed="2.0">2x</button>
+                <div class="vcr-slider-container flex-grow-1 position-relative d-flex align-items-center">
+                    <input type="range" class="form-range vcr-slider" id="vcrSlider" min="0" max="1000" value="1000" step="1" title="Scrub Playback Time">
+                </div>
+                <div class="vcr-time-display flex-shrink-0 font-monospace small px-2 py-1 rounded bg-body-tertiary border" id="vcrTimeDisplay">
+                    <span id="vcrTimeText">LIVE</span>
                 </div>
             </div>
 
-            <!-- Right Controls -->
-            <div class="d-flex align-items-center gap-2">
+            <!-- Right Controls: History Presets, Speed Multipliers & Fit -->
+            <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                <div class="btn-group btn-group-sm d-none d-md-inline-flex" role="group" id="vcrRangeGroup" aria-label="Replay Window">
+                    <button type="button" class="btn btn-outline-secondary" data-range="3600" title="Replay past 1 hour">-1h</button>
+                    <button type="button" class="btn btn-outline-secondary" data-range="21600" title="Replay past 6 hours">-6h</button>
+                    <button type="button" class="btn btn-outline-secondary" data-range="86400" title="Replay past 24 hours">-24h</button>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" id="playbackSpeedGroup" aria-label="Playback speed">
+                    <button type="button" class="btn btn-outline-secondary active" data-speed="1.0">1x</button>
+                    <button type="button" class="btn btn-outline-secondary" data-speed="5.0">5x</button>
+                    <button type="button" class="btn btn-outline-secondary" data-speed="15.0">15x</button>
+                    <button type="button" class="btn btn-outline-secondary" data-speed="60.0">60x</button>
+                </div>
                 <button class="btn btn-sm btn-outline-secondary" id="fitNodesBtn" title="Fit map to all nodes">
-                    <i class="bi bi-arrows-move"></i> Fit Map
+                    <i class="bi bi-arrows-move"></i>
                 </button>
             </div>
         </div>
@@ -598,6 +673,19 @@
     let inspectedPacket = null;
     let inspectedRouteGroup = null; // L.layerGroup for pinned route
     const packetsByIdMap = new Map(); // packet.id -> pkt
+
+    // Replay & VCR State (Step 6)
+    let playbackMode = 'LIVE'; // 'LIVE' | 'REPLAY'
+    let replayState = 'IDLE'; // 'IDLE' | 'PLAYING' | 'PAUSED' | 'SEEKING'
+    let historicalPackets = [];
+    let replayWindowStart = 0; // epoch seconds
+    let replayWindowEnd = 0; // epoch seconds
+    let replayCurrentTime = 0; // epoch seconds
+    let replaySpeedMultiplier = 1.0; // 1.0, 5.0, 15.0, 60.0
+    let replayNextPacketIndex = 0;
+    let replayAnimFrame = null;
+    let lastReplayTickRealTime = null;
+    let activeRangeSeconds = 3600; // default 1h
 
     // Role colors matching Malla's standard map
     const ROLE_COLORS = {
@@ -689,6 +777,11 @@
         }
 
         updatePillUI() {
+            if (playbackMode === 'REPLAY') {
+                updatePlaybackStatusUI();
+                return;
+            }
+
             const pill = document.getElementById('liveStatusPill');
             const text = document.getElementById('liveStatusText');
             const icon = document.getElementById('playPauseIcon');
@@ -913,8 +1006,15 @@
         else if (opts.pathType === 'multi_hop_relay') baseDuration = 2100; // (was 2800ms)
         else if (opts.pathType === 'traceroute') baseDuration = Math.max(1200, (opts.pathPoints ? opts.pathPoints.length : 2) * 640);
 
-        const duration = Math.round(baseDuration / animationSpeedMultiplier);
-        const fadeDuration = Math.round(3150 / animationSpeedMultiplier);
+        let speedFactor = animationSpeedMultiplier;
+        if (playbackMode === 'REPLAY') {
+            if (replaySpeedMultiplier >= 60) speedFactor = 3.5;
+            else if (replaySpeedMultiplier >= 15) speedFactor = 2.5;
+            else if (replaySpeedMultiplier >= 5) speedFactor = 1.8;
+        }
+
+        const duration = Math.round(baseDuration / speedFactor);
+        const fadeDuration = Math.round(3150 / speedFactor);
 
         const flight = {
             id: 'flight_' + Math.random().toString(36).slice(2, 9),
@@ -1534,6 +1634,13 @@
         if (!marker || !map) return;
         const latLng = marker.getLatLng();
 
+        let speedFactor = animationSpeedMultiplier;
+        if (playbackMode === 'REPLAY') {
+            if (replaySpeedMultiplier >= 60) speedFactor = 3.0;
+            else if (replaySpeedMultiplier >= 15) speedFactor = 2.2;
+            else if (replaySpeedMultiplier >= 5) speedFactor = 1.6;
+        }
+
         // 1. Bloom/flash the marker itself
         try {
             const origRadius = marker.getRadius ? marker.getRadius() : 6;
@@ -1545,7 +1652,7 @@
                     marker.setRadius(origRadius);
                     marker.setStyle({ weight: origWeight });
                 }
-            }, Math.round(225 / animationSpeedMultiplier));
+            }, Math.round(225 / speedFactor));
         } catch (e) {}
 
         // 2. Double-shockwave ripple rings
@@ -1567,7 +1674,7 @@
                 const totalSteps = 28;
                 const stepRadius = (targetRadius - 7) / totalSteps;
                 const stepOpacity = startOpacity / totalSteps;
-                const stepDelay = Math.max(16, Math.round(21 / animationSpeedMultiplier));
+                const stepDelay = Math.max(16, Math.round(21 / speedFactor));
 
                 const interval = setInterval(() => {
                     currentRadius += stepRadius;
@@ -1584,7 +1691,7 @@
                         });
                     }
                 }, stepDelay);
-            }, Math.round(delayMs / animationSpeedMultiplier));
+            }, Math.round(delayMs / speedFactor));
         }
 
         launchRing(0, maxRadius, 3.5, 0.95);
@@ -1685,12 +1792,14 @@
         next();
     }
 
-    function playSinglePacket(pkt) {
-        totalPacketsReceived++;
-        packetTimestampsWindow.push(Date.now());
+    function playSinglePacket(pkt, addToFeed = true) {
+        if (addToFeed) {
+            totalPacketsReceived++;
+            packetTimestampsWindow.push(Date.now());
 
-        const emptyState = document.getElementById('feedEmptyState');
-        if (emptyState) emptyState.style.display = 'none';
+            const emptyState = document.getElementById('feedEmptyState');
+            if (emptyState) emptyState.style.display = 'none';
+        }
 
         // 1. Dynamic marker repositioning / spawning (always runs so map positions stay accurate)
         if (pkt.from_node_id && pkt.from_location) {
@@ -1793,16 +1902,18 @@
             });
         }
 
-        // 4. Prepend card to live feed with animated entry
-        const feedBody = document.getElementById('liveFeedBody');
-        if (feedBody) {
-            const card = createPacketCard(pkt);
-            feedBody.prepend(card);
-            pruneFeedCards();
-        }
+        // 4. Prepend card to live feed with animated entry (if addToFeed is true)
+        if (addToFeed) {
+            const feedBody = document.getElementById('liveFeedBody');
+            if (feedBody) {
+                const card = createPacketCard(pkt);
+                feedBody.prepend(card);
+                pruneFeedCards();
+            }
 
-        updateVisibleFeedCount();
-        updatePacketRate();
+            updateVisibleFeedCount();
+            updatePacketRate();
+        }
     }
 
     function pruneFeedCards() {
@@ -2461,13 +2572,299 @@
         });
     }
 
+    // =========================================================================
+    // 4. VCR Replay & Time Scrubber Engine (Step 6)
+    // =========================================================================
+    function updatePlaybackStatusUI() {
+        const pill = document.getElementById('liveStatusPill');
+        const text = document.getElementById('liveStatusText');
+        const icon = document.getElementById('playPauseIcon');
+        const jumpBtn = document.getElementById('jumpToLiveBtn');
+
+        if (!pill || !text) return;
+
+        if (playbackMode === 'LIVE') {
+            if (jumpBtn) jumpBtn.classList.add('d-none');
+            if (streamProvider) {
+                streamProvider.updatePillUI();
+            }
+        } else {
+            // REPLAY mode
+            if (jumpBtn) jumpBtn.classList.remove('d-none');
+            if (replayState === 'PAUSED' || replayState === 'IDLE') {
+                pill.className = 'live-status-pill replay-paused';
+                text.textContent = 'REPLAY (PAUSED)';
+                if (icon) {
+                    icon.classList.remove('bi-pause-fill');
+                    icon.classList.add('bi-play-fill');
+                }
+            } else {
+                pill.className = 'live-status-pill replay';
+                text.textContent = 'REPLAY';
+                if (icon) {
+                    icon.classList.remove('bi-play-fill');
+                    icon.classList.add('bi-pause-fill');
+                }
+            }
+        }
+    }
+
+    function formatReplayTime(epochSec) {
+        if (!epochSec || playbackMode === 'LIVE') return 'LIVE';
+        const d = new Date(epochSec * 1000);
+        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const diffSec = Math.max(0, Math.round((Date.now() / 1000) - epochSec));
+        if (diffSec < 60) return `${timeStr} (now)`;
+        const diffMin = Math.round(diffSec / 60);
+        if (diffMin < 60) return `${timeStr} (-${diffMin}m)`;
+        const diffHours = (diffSec / 3600).toFixed(1);
+        return `${timeStr} (-${diffHours}h)`;
+    }
+
+    function updateScrubberUI() {
+        const vcrSlider = document.getElementById('vcrSlider');
+        const vcrTimeText = document.getElementById('vcrTimeText');
+        if (!vcrSlider || !vcrTimeText) return;
+
+        if (playbackMode === 'LIVE') {
+            vcrSlider.value = 1000;
+            vcrTimeText.textContent = 'LIVE';
+        } else {
+            const range = replayWindowEnd - replayWindowStart;
+            if (range > 0) {
+                const frac = Math.max(0, Math.min(1, (replayCurrentTime - replayWindowStart) / range));
+                vcrSlider.value = Math.round(frac * 1000);
+            }
+            vcrTimeText.textContent = formatReplayTime(replayCurrentTime);
+        }
+    }
+
+    async function startHistoricalReplay(rangeSeconds, initialSeekFraction = 0) {
+        if (replayAnimFrame) {
+            cancelAnimationFrame(replayAnimFrame);
+            replayAnimFrame = null;
+        }
+
+        playbackMode = 'REPLAY';
+        replayState = 'PAUSED';
+        activeRangeSeconds = rangeSeconds;
+
+        if (streamProvider) {
+            streamProvider.pause();
+        }
+
+        // Highlight selected preset
+        const rangeBtns = document.querySelectorAll('#vcrRangeGroup button');
+        rangeBtns.forEach(b => {
+            const r = parseInt(b.dataset.range, 10);
+            if (r === rangeSeconds) {
+                b.classList.add('active');
+            } else {
+                b.classList.remove('active');
+            }
+        });
+
+        updatePlaybackStatusUI();
+
+        // Clear active flights
+        activeFlights = [];
+        if (canvasCtx && packetCanvas) {
+            const rect = packetCanvas.getBoundingClientRect();
+            canvasCtx.clearRect(0, 0, rect.width, rect.height);
+        }
+
+        const vcrTimeText = document.getElementById('vcrTimeText');
+        if (vcrTimeText) {
+            vcrTimeText.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Loading...';
+        }
+
+        const endTs = Math.floor(Date.now() / 1000);
+        const startTs = endTs - rangeSeconds;
+
+        try {
+            const resp = await fetch(`/api/live/history?start_time=${startTs}&end_time=${endTs}&limit=2000`);
+            if (!resp.ok) {
+                throw new Error(`Server returned HTTP ${resp.status}`);
+            }
+            const data = await resp.json();
+            historicalPackets = (data && data.packets) ? data.packets : [];
+            replayWindowStart = startTs;
+            replayWindowEnd = endTs;
+
+            if (initialSeekFraction > 0) {
+                replayCurrentTime = replayWindowStart + initialSeekFraction * (replayWindowEnd - replayWindowStart);
+            } else {
+                replayCurrentTime = replayWindowStart;
+            }
+
+            replayNextPacketIndex = historicalPackets.findIndex(p => p.timestamp >= replayCurrentTime);
+            if (replayNextPacketIndex === -1) {
+                replayNextPacketIndex = historicalPackets.length;
+            }
+
+            // Feed indicator banner
+            const feedBody = document.getElementById('liveFeedBody');
+            if (feedBody) {
+                const emptyState = document.getElementById('feedEmptyState');
+                if (emptyState) emptyState.style.display = 'none';
+                feedBody.innerHTML = `
+                    <div class="alert alert-info py-2 px-3 small mb-2 d-flex align-items-center justify-content-between">
+                        <span><i class="bi bi-clock-history"></i> Replay loaded: <strong>${historicalPackets.length}</strong> packets</span>
+                        <span class="badge text-bg-primary">${rangeSeconds / 3600}h window</span>
+                    </div>
+                `;
+            }
+
+            replayState = 'PLAYING';
+            lastReplayTickRealTime = performance.now();
+            updatePlaybackStatusUI();
+            updateScrubberUI();
+            runReplayLoop();
+        } catch (err) {
+            console.error('Error starting historical replay:', err);
+            if (vcrTimeText) {
+                vcrTimeText.textContent = 'Error loading history';
+            }
+            replayState = 'PAUSED';
+            updatePlaybackStatusUI();
+        }
+    }
+
+    function runReplayLoop() {
+        if (playbackMode !== 'REPLAY' || replayState !== 'PLAYING') return;
+
+        const now = performance.now();
+        if (!lastReplayTickRealTime) lastReplayTickRealTime = now;
+        const deltaRealSec = (now - lastReplayTickRealTime) / 1000;
+        lastReplayTickRealTime = now;
+
+        const deltaReplaySec = deltaRealSec * replaySpeedMultiplier;
+        replayCurrentTime += deltaReplaySec;
+
+        while (
+            replayNextPacketIndex < historicalPackets.length &&
+            historicalPackets[replayNextPacketIndex].timestamp <= replayCurrentTime
+        ) {
+            const pkt = historicalPackets[replayNextPacketIndex];
+            playSinglePacket(pkt);
+            replayNextPacketIndex++;
+        }
+
+        updateScrubberUI();
+
+        if (replayCurrentTime >= replayWindowEnd) {
+            replayCurrentTime = replayWindowEnd;
+            replayState = 'PAUSED';
+            updatePlaybackStatusUI();
+            updateScrubberUI();
+            return;
+        }
+
+        replayAnimFrame = requestAnimationFrame(runReplayLoop);
+    }
+
+    function seekReplayTo(targetTime) {
+        if (playbackMode !== 'REPLAY') return;
+
+        replayCurrentTime = Math.max(replayWindowStart, Math.min(replayWindowEnd, targetTime));
+        replayNextPacketIndex = historicalPackets.findIndex(p => p.timestamp >= replayCurrentTime);
+        if (replayNextPacketIndex === -1) {
+            replayNextPacketIndex = historicalPackets.length;
+        }
+
+        activeFlights = [];
+        if (canvasCtx && packetCanvas) {
+            const rect = packetCanvas.getBoundingClientRect();
+            canvasCtx.clearRect(0, 0, rect.width, rect.height);
+        }
+
+        updateScrubberUI();
+        lastReplayTickRealTime = performance.now();
+    }
+
+    function jumpToLive() {
+        if (replayAnimFrame) {
+            cancelAnimationFrame(replayAnimFrame);
+            replayAnimFrame = null;
+        }
+        playbackMode = 'LIVE';
+        replayState = 'IDLE';
+        historicalPackets = [];
+
+        document.querySelectorAll('#vcrRangeGroup button').forEach(b => b.classList.remove('active'));
+
+        const jumpBtn = document.getElementById('jumpToLiveBtn');
+        if (jumpBtn) jumpBtn.classList.add('d-none');
+
+        updateScrubberUI();
+
+        activeFlights = [];
+        if (canvasCtx && packetCanvas) {
+            const rect = packetCanvas.getBoundingClientRect();
+            canvasCtx.clearRect(0, 0, rect.width, rect.height);
+        }
+
+        const feedBody = document.getElementById('liveFeedBody');
+        if (feedBody) {
+            feedBody.innerHTML = `
+                <div class="feed-empty-state" id="feedEmptyState">
+                    <i class="bi bi-radar"></i>
+                    <h6 class="fw-bold mt-2">Waiting for traffic</h6>
+                    <p class="small text-muted mb-0">Packets captured by the mesh will appear here and animate across the map in real time.</p>
+                </div>
+            `;
+        }
+
+        if (streamProvider) {
+            streamProvider.cursorId = null;
+            streamProvider.resume();
+        }
+        updatePlaybackStatusUI();
+    }
+
     if (fitNodesBtn) {
         fitNodesBtn.addEventListener('click', fitMapBounds);
     }
 
     if (playPauseBtn) {
         playPauseBtn.addEventListener('click', () => {
-            if (streamProvider) streamProvider.togglePause();
+            if (playbackMode === 'LIVE') {
+                if (streamProvider) streamProvider.togglePause();
+            } else {
+                if (replayState === 'PLAYING') {
+                    replayState = 'PAUSED';
+                    if (replayAnimFrame) {
+                        cancelAnimationFrame(replayAnimFrame);
+                        replayAnimFrame = null;
+                    }
+                    updatePlaybackStatusUI();
+                } else {
+                    if (replayCurrentTime >= replayWindowEnd) {
+                        seekReplayTo(replayWindowStart);
+                    }
+                    replayState = 'PLAYING';
+                    lastReplayTickRealTime = performance.now();
+                    updatePlaybackStatusUI();
+                    runReplayLoop();
+                }
+            }
+        });
+    }
+
+    const jumpToLiveBtn = document.getElementById('jumpToLiveBtn');
+    if (jumpToLiveBtn) {
+        jumpToLiveBtn.addEventListener('click', jumpToLive);
+    }
+
+    const vcrRangeGroup = document.getElementById('vcrRangeGroup');
+    if (vcrRangeGroup) {
+        vcrRangeGroup.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-range]');
+            if (!btn) return;
+            const range = parseInt(btn.dataset.range, 10);
+            if (!isNaN(range) && range > 0) {
+                startHistoricalReplay(range, 0);
+            }
         });
     }
 
@@ -2478,9 +2875,36 @@
             if (!btn) return;
             const speed = parseFloat(btn.dataset.speed);
             if (!isNaN(speed) && speed > 0) {
-                animationSpeedMultiplier = speed;
+                replaySpeedMultiplier = speed;
+                animationSpeedMultiplier = Math.min(2.0, Math.max(0.5, speed));
                 playbackSpeedGroup.querySelectorAll('button').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+            }
+        });
+    }
+
+    const vcrSlider = document.getElementById('vcrSlider');
+    if (vcrSlider) {
+        vcrSlider.addEventListener('input', (e) => {
+            const frac = parseFloat(e.target.value) / 1000;
+            if (playbackMode === 'LIVE') {
+                if (frac < 0.98) {
+                    startHistoricalReplay(3600, frac);
+                }
+            } else {
+                const targetTime = replayWindowStart + frac * (replayWindowEnd - replayWindowStart);
+                const vcrTimeText = document.getElementById('vcrTimeText');
+                if (vcrTimeText) {
+                    vcrTimeText.textContent = formatReplayTime(targetTime);
+                }
+            }
+        });
+
+        vcrSlider.addEventListener('change', (e) => {
+            if (playbackMode === 'REPLAY') {
+                const frac = parseFloat(e.target.value) / 1000;
+                const targetTime = replayWindowStart + frac * (replayWindowEnd - replayWindowStart);
+                seekReplayTo(targetTime);
             }
         });
     }
@@ -2516,7 +2940,16 @@
     if (inspectorReplayBtn) {
         inspectorReplayBtn.addEventListener('click', () => {
             if (inspectedPacket) {
-                playSinglePacket(inspectedPacket);
+                // Replay the animation without duplicating the card in the feed
+                playSinglePacket(inspectedPacket, false);
+
+                // Highlight existing card in the feed if visible
+                const existingCard = document.querySelector(`.packet-card[data-packet-id="${inspectedPacket.id}"]`);
+                if (existingCard) {
+                    existingCard.classList.remove('selected');
+                    void existingCard.offsetWidth; // trigger reflow for pulse
+                    existingCard.classList.add('selected');
+                }
             }
         });
     }

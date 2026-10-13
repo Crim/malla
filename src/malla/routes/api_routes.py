@@ -2445,6 +2445,72 @@ def api_live_packets():
         )
 
 
+@api_bp.route("/live/history")
+def api_live_history():
+    """
+    Get historical packet stream within a time window with resolved geospatial routes.
+
+    Query parameters:
+        start_time (float, required): Start unix timestamp (seconds).
+        end_time (float, required): End unix timestamp (seconds).
+        limit (int, optional): Max packets (1..2000, default 500).
+        include_unlocated (bool, optional): Include packets without coordinates (default true).
+    """
+    try:
+        start_time_str = request.args.get("start_time")
+        end_time_str = request.args.get("end_time")
+
+        if start_time_str is None or end_time_str is None:
+            return (
+                safe_jsonify(
+                    {"error": "Missing required parameters: start_time and end_time"}
+                ),
+                400,
+            )
+
+        try:
+            start_time = float(start_time_str)
+            end_time = float(end_time_str)
+        except (ValueError, TypeError):
+            return (
+                safe_jsonify(
+                    {"error": "start_time and end_time must be valid numeric timestamps"}
+                ),
+                400,
+            )
+
+        if start_time > end_time:
+            return (
+                safe_jsonify(
+                    {"error": "start_time cannot be greater than end_time"}
+                ),
+                400,
+            )
+
+        limit = _clamp_limit(default=500, maximum=2000)
+        include_unlocated_str = request.args.get("include_unlocated", "true").lower()
+        include_unlocated = include_unlocated_str not in ("0", "false", "no")
+
+        from ..services.live_packet_service import LivePacketService
+
+        result = LivePacketService.get_historical_packets(
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            include_unlocated=include_unlocated,
+        )
+
+        return safe_jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in live history API: {e}", exc_info=True)
+        return (
+            safe_jsonify(
+                {"error": str(e), "packets": [], "count": 0}
+            ),
+            500,
+        )
+
+
 def safe_jsonify(data, *args, **kwargs):
 
     """
