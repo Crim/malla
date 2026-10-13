@@ -1573,7 +1573,7 @@
 
     // Dynamic Node Marker Repositioning & Spawning
     function updateOrSpawnNodeMarker(nodeId, lat, lng, nodeData, isPositionUpdate = false) {
-        if (!nodeId || isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null;
+        if (!nodeId || isNaN(lat) || isNaN(lng) || (Math.abs(lat) < 0.05 && Math.abs(lng) < 0.05) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
         const existing = nodeMarkersMap.get(nodeId);
 
@@ -2529,7 +2529,8 @@
                                 }
                             });
                         }
-                        points.push(gwCoord);
+                        const targetCoord = (pkt.to_node_id && pkt.to_node_id !== 0xFFFFFFFF) ? resolveCoord(pkt.to_node_id, null) : null;
+                        points.push(targetCoord || gwCoord);
                         L.polyline(points, {
                             color: '#06b6d4',
                             weight: 4.5,

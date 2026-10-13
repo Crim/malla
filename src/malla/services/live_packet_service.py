@@ -236,7 +236,7 @@ class LivePacketService:
                     if pos.latitude_i and pos.longitude_i:
                         lat_f = pos.latitude_i / 1e7
                         lon_f = pos.longitude_i / 1e7
-                        if lat_f != 0.0 or lon_f != 0.0:
+                        if (abs(lat_f) > 0.05 or abs(lon_f) > 0.05) and -90.0 <= lat_f <= 90.0 and -180.0 <= lon_f <= 180.0:
                             f_id = convert_node_id(r["from_node_id"])
                             if f_id:
                                 loc_cache[f_id] = (lat_f, lon_f)
