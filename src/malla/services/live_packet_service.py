@@ -120,10 +120,11 @@ class LivePacketService:
                 cursor.execute(query, (limit,))
                 rows = list(reversed(cursor.fetchall()))
 
-            # Check highest id in table even if rows is empty
-            cursor.execute("SELECT MAX(id) FROM packet_history")
-            max_id_row = cursor.fetchone()
-            global_latest_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
+            # Check highest id and max timestamp in table even if rows is empty
+            cursor.execute("SELECT MAX(id), MAX(timestamp) FROM packet_history")
+            max_row = cursor.fetchone()
+            global_latest_id = max_row[0] if max_row and max_row[0] is not None else 0
+            global_latest_timestamp = float(max_row[1]) if max_row and max_row[1] is not None else 0.0
 
         finally:
             conn.close()
@@ -132,6 +133,7 @@ class LivePacketService:
             return {
                 "packets": [],
                 "latest_id": global_latest_id,
+                "latest_timestamp": global_latest_timestamp,
                 "count": 0,
             }
 
@@ -142,6 +144,7 @@ class LivePacketService:
         return {
             "packets": output_packets,
             "latest_id": effective_latest_id,
+            "latest_timestamp": global_latest_timestamp,
             "count": len(output_packets),
         }
 
@@ -234,7 +237,9 @@ class LivePacketService:
                         lat_f = pos.latitude_i / 1e7
                         lon_f = pos.longitude_i / 1e7
                         if lat_f != 0.0 or lon_f != 0.0:
-                            loc_cache[int(r["from_node_id"])] = (lat_f, lon_f)
+                            f_id = convert_node_id(r["from_node_id"])
+                            if f_id:
+                                loc_cache[f_id] = (lat_f, lon_f)
                 except Exception:
                     pass
 
@@ -246,9 +251,13 @@ class LivePacketService:
 
         for r in rows:
             if r["from_node_id"]:
-                node_ids_to_resolve.add(int(r["from_node_id"]))
-            if r["to_node_id"] and r["to_node_id"] != 0xFFFFFFFF:
-                node_ids_to_resolve.add(int(r["to_node_id"]))
+                f_id = convert_node_id(r["from_node_id"])
+                if f_id:
+                    node_ids_to_resolve.add(f_id)
+            if r["to_node_id"]:
+                t_id = convert_node_id(r["to_node_id"])
+                if t_id and t_id != 0xFFFFFFFF:
+                    node_ids_to_resolve.add(t_id)
             if r["gateway_id"]:
                 gw_int = convert_node_id(r["gateway_id"])
                 if gw_int:
@@ -274,26 +283,31 @@ class LivePacketService:
 
         # -------------------------------------------------------------
         # 3. Group receptions by mesh_packet_id for multi-gateway fan-out
+        #    Only merge into the same transmission within a 30s broadcast window.
         # -------------------------------------------------------------
-        groups: dict[Any, list[Any]] = {}
+        groups: list[list[Any]] = []
+        active_groups: dict[tuple[int, Any], list[Any]] = {}
+
         for r in rows:
             mp_id = r["mesh_packet_id"]
             from_id = r["from_node_id"]
             if mp_id is not None and mp_id != 0:
                 key = (mp_id, from_id)
+                if key in active_groups and abs(r["timestamp"] - active_groups[key][0]["timestamp"]) <= 30.0:
+                    active_groups[key].append(r)
+                    continue
+                new_group = [r]
+                active_groups[key] = new_group
+                groups.append(new_group)
             else:
-                key = f"row_{r['id']}"
-
-            if key not in groups:
-                groups[key] = []
-            groups[key].append(r)
+                groups.append([r])
 
         output_packets: list[dict[str, Any]] = []
 
-        for group_rows in groups.values():
+        for group_rows in groups:
             prim = group_rows[0]
-            from_id = int(prim["from_node_id"]) if prim["from_node_id"] is not None else None
-            to_id = int(prim["to_node_id"]) if prim["to_node_id"] is not None else None
+            from_id = convert_node_id(prim["from_node_id"]) if prim["from_node_id"] is not None else None
+            to_id = convert_node_id(prim["to_node_id"]) if prim["to_node_id"] is not None else None
             is_broadcast = (to_id is None or to_id == 0xFFFFFFFF)
 
             from_loc = loc_cache.get(from_id) if from_id is not None else None
@@ -322,21 +336,26 @@ class LivePacketService:
                 hop_limit = r["hop_limit"] or 0
                 hops_away = max(0, hop_start - hop_limit)
 
+                # Gateway hearing itself transmits directly (0 hops away)
+                if from_id is not None and gw_int is not None and from_id == gw_int:
+                    hops_away = 0
+
                 # Determine Path Type & Coordinates (Honest pathing - no invented routes)
                 path_type = "unlocated"
                 path_coords: list[list[float]] = []
                 relay_info: dict[str, Any] | None = None
                 traceroute_hops: list[dict[str, Any]] = []
 
-                # 1. Traceroute (ROUTING_APP)
-                if r["portnum"] == 70 or r["portnum_name"] == "ROUTING_APP":
-                    path_type = "traceroute"
-                    if from_loc:
-                        path_coords.append([from_loc[0], from_loc[1]])
-                    if r["raw_payload"]:
-                        try:
-                            r_data = parse_traceroute_payload(r["raw_payload"])
-                            hop_ids = r_data.get("route_nodes", []) or r_data.get("route_back", [])
+                # 1. Traceroute (ROUTING_APP or TRACEROUTE_APP with discovered route)
+                is_trace_port = (r["portnum"] in (5, 70) or r["portnum_name"] in ("TRACEROUTE_APP", "ROUTING_APP"))
+                if is_trace_port and r["raw_payload"]:
+                    try:
+                        r_data = parse_traceroute_payload(r["raw_payload"])
+                        hop_ids = r_data.get("route_nodes", []) or r_data.get("route_back", [])
+                        if hop_ids:
+                            path_type = "traceroute"
+                            if from_loc:
+                                path_coords.append([from_loc[0], from_loc[1]])
                             for hop_id in hop_ids:
                                 hop_loc = loc_cache.get(hop_id)
                                 hop_name = node_names.get(hop_id, f"!{hop_id:08x}")
@@ -349,13 +368,15 @@ class LivePacketService:
                                 })
                                 if hop_loc:
                                     path_coords.append([hop_loc[0], hop_loc[1]])
-                        except Exception:
-                            pass
-                    if gw_loc:
-                        path_coords.append([gw_loc[0], gw_loc[1]])
+                            if gw_loc:
+                                path_coords.append([gw_loc[0], gw_loc[1]])
+                    except Exception:
+                        pass
 
+                if path_type == "traceroute":
+                    pass
                 elif from_loc is not None and gw_loc is not None:
-                    # 2. Direct RF reception (0 hops)
+                    # 2. Direct RF reception (0 hops) or gateway transmitting its own packet
                     if hops_away == 0:
                         path_type = "direct"
                         path_coords = [
@@ -371,18 +392,25 @@ class LivePacketService:
                             cand = gw_candidates[0]
                             cand_id = cand.get("node_id")
                             cand_loc = loc_cache.get(cand_id) if cand_id is not None else None
-                            path_type = "relay"
-                            path_coords = [
-                                [from_loc[0], from_loc[1]],
-                                [cand_loc[0], cand_loc[1]] if cand_loc else [],
-                                [gw_loc[0], gw_loc[1]],
-                            ]
                             relay_info = {
                                 "node_id": cand_id,
                                 "hex_id": cand.get("hex_id", f"!{cand_id:08x}"),
                                 "name": cand.get("long_name") or cand.get("short_name") or f"!{cand_id:08x}",
                                 "location": {"latitude": cand_loc[0], "longitude": cand_loc[1]} if cand_loc else None,
                             }
+                            if cand_loc is not None:
+                                path_type = "relay"
+                                path_coords = [
+                                    [from_loc[0], from_loc[1]],
+                                    [cand_loc[0], cand_loc[1]],
+                                    [gw_loc[0], gw_loc[1]],
+                                ]
+                            else:
+                                path_type = "arc_unknown"
+                                path_coords = [
+                                    [from_loc[0], from_loc[1]],
+                                    [gw_loc[0], gw_loc[1]],
+                                ]
                         else:
                             path_type = "arc_unknown"
                             path_coords = [[from_loc[0], from_loc[1]], [gw_loc[0], gw_loc[1]]]
@@ -395,12 +423,6 @@ class LivePacketService:
                             cand = gw_candidates[0]
                             cand_id = cand.get("node_id")
                             cand_loc = loc_cache.get(cand_id) if cand_id is not None else None
-                            path_type = "multi_hop_relay"
-                            path_coords = [
-                                [from_loc[0], from_loc[1]],
-                                [cand_loc[0], cand_loc[1]] if cand_loc else [],
-                                [gw_loc[0], gw_loc[1]],
-                            ]
                             relay_info = {
                                 "node_id": cand_id,
                                 "hex_id": cand.get("hex_id", f"!{cand_id:08x}"),
@@ -408,6 +430,19 @@ class LivePacketService:
                                 "location": {"latitude": cand_loc[0], "longitude": cand_loc[1]} if cand_loc else None,
                                 "remaining_hops": hops_away - 1,
                             }
+                            if cand_loc is not None:
+                                path_type = "multi_hop_relay"
+                                path_coords = [
+                                    [from_loc[0], from_loc[1]],
+                                    [cand_loc[0], cand_loc[1]],
+                                    [gw_loc[0], gw_loc[1]],
+                                ]
+                            else:
+                                path_type = "arc_unknown"
+                                path_coords = [
+                                    [from_loc[0], from_loc[1]],
+                                    [gw_loc[0], gw_loc[1]],
+                                ]
                         else:
                             path_type = "arc_unknown"
                             path_coords = [[from_loc[0], from_loc[1]], [gw_loc[0], gw_loc[1]]]

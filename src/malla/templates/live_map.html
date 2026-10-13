@@ -686,6 +686,7 @@
     let replayAnimFrame = null;
     let lastReplayTickRealTime = null;
     let activeRangeSeconds = 3600; // default 1h
+    let latestDbTimestamp = null; // latest timestamp from DB for archive anchoring
 
     // Role colors matching Malla's standard map
     const ROLE_COLORS = {
@@ -838,6 +839,9 @@
                     if (data.latest_id !== undefined && data.latest_id !== null) {
                         this.cursorId = data.latest_id;
                     }
+                    if (data.latest_timestamp !== undefined && data.latest_timestamp !== null && data.latest_timestamp > 0) {
+                        latestDbTimestamp = data.latest_timestamp;
+                    }
                     if (data.packets && data.packets.length > 0 && this.onPacketsCallback) {
                         this.onPacketsCallback(data.packets);
                     }
@@ -988,7 +992,7 @@
         if (name.includes('TEXT')) return '#818cf8';      // Indigo / Purple
         if (name.includes('POSITION')) return '#10b981';  // Emerald Green
         if (name.includes('TELEMETRY')) return '#f59e0b'; // Amber Gold
-        if (name.includes('ROUTING')) return '#06b6d4';   // Neon Cyan
+        if (name.includes('ROUTING') || name.includes('TRACEROUTE')) return '#06b6d4';   // Neon Cyan
         if (name.includes('NODEINFO')) return '#a855f7';  // Violet
         if (name.includes('NEIGHBOR')) return '#ec4899';  // Hot Pink
         return '#38bdf8';                                 // Sky Blue
@@ -1082,10 +1086,15 @@
         const s0 = map.latLngToContainerPoint([f.fromLoc.latitude, f.fromLoc.longitude]);
         const s1 = map.latLngToContainerPoint([f.toLoc.latitude, f.toLoc.longitude]);
 
+        let effectivePathType = f.pathType;
+        if ((effectivePathType === 'relay' || effectivePathType === 'multi_hop_relay') && (!f.relayInfo || !f.relayInfo.location || !f.relayInfo.location.latitude)) {
+            effectivePathType = 'arc_unknown';
+        }
+
         // ==========================================
         // 1. Curved Arc (Multi-Hop Unknown Intermediate)
         // ==========================================
-        if (f.pathType === 'arc_unknown') {
+        if (effectivePathType === 'arc_unknown') {
             const dx = s1.x - s0.x;
             const dy = s1.y - s0.y;
             const dist = Math.hypot(dx, dy);
@@ -1839,6 +1848,14 @@
 
                 if (!gwLoc) return;
 
+                // Skip canvas flight if gateway is the transmitting node itself (self-packet)
+                if (rec.gateway_node_id && pkt.from_node_id && rec.gateway_node_id === pkt.from_node_id) {
+                    return;
+                }
+                if (Math.hypot(fromLoc.latitude - gwLoc.latitude, fromLoc.longitude - gwLoc.longitude) < 0.00001) {
+                    return;
+                }
+
                 // For traceroute: construct full sequence of points
                 let pathPoints = null;
                 if (rec.path_type === 'traceroute') {
@@ -2006,7 +2023,7 @@
         if (name.includes('TEXT')) return 'type-text';
         if (name.includes('POSITION')) return 'type-position';
         if (name.includes('TELEMETRY')) return 'type-telemetry';
-        if (name.includes('ROUTING')) return 'type-traceroute';
+        if (name.includes('ROUTING') || name.includes('TRACEROUTE')) return 'type-traceroute';
         if (name.includes('NODEINFO')) return 'type-nodeinfo';
         return 'type-other';
     }
@@ -2016,7 +2033,7 @@
         if (name.includes('TEXT')) return 'badge-text';
         if (name.includes('POSITION')) return 'badge-position';
         if (name.includes('TELEMETRY')) return 'badge-telemetry';
-        if (name.includes('ROUTING')) return 'badge-traceroute';
+        if (name.includes('ROUTING') || name.includes('TRACEROUTE')) return 'badge-traceroute';
         if (name.includes('NODEINFO')) return 'badge-nodeinfo';
         return 'badge-other';
     }
@@ -2026,7 +2043,7 @@
         if (name.includes('TEXT')) return '💬';
         if (name.includes('POSITION')) return '📍';
         if (name.includes('TELEMETRY')) return '🔋';
-        if (name.includes('ROUTING')) return '🧭';
+        if (name.includes('ROUTING') || name.includes('TRACEROUTE')) return '🧭';
         if (name.includes('NODEINFO')) return 'ℹ️';
         return '📦';
     }
@@ -2072,7 +2089,7 @@
         if (name.includes('TEXT')) return 'TEXT';
         if (name.includes('POSITION')) return 'POSITION';
         if (name.includes('TELEMETRY')) return 'TELEMETRY';
-        if (name.includes('ROUTING')) return 'ROUTING';
+        if (name.includes('ROUTING') || name.includes('TRACEROUTE')) return 'ROUTING';
         if (name.includes('NODEINFO') || name.includes('NEIGHBOR')) return 'NODEINFO';
         return 'OTHER';
     }
@@ -2166,6 +2183,7 @@
         const dLat = lat1 - lat0;
         const dLng = lng1 - lng0;
         const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+        if (dist < 0.00001) return [p0, p1];
 
         const offset = Math.min(dist * 0.22, 1.2);
         const perpLat = -dLng / (dist || 1) * offset;
@@ -2678,7 +2696,13 @@
             vcrTimeText.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Loading...';
         }
 
-        const endTs = Math.floor(Date.now() / 1000);
+        const nowSec = Math.floor(Date.now() / 1000);
+        let endTs = nowSec;
+        // If DB timestamp is available and differs significantly from wall clock (> 2 hours),
+        // anchor replay window to the database's max timestamp for archive DB exploration.
+        if (latestDbTimestamp && (nowSec - latestDbTimestamp > 7200 || latestDbTimestamp > nowSec)) {
+            endTs = Math.floor(latestDbTimestamp);
+        }
         const startTs = endTs - rangeSeconds;
 
         try {

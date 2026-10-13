@@ -41,9 +41,11 @@ class TestLivePacketsAPI:
         data = response.get_json()
         assert "packets" in data
         assert "latest_id" in data
+        assert "latest_timestamp" in data
         assert "count" in data
         assert isinstance(data["packets"], list)
         assert isinstance(data["latest_id"], int)
+        assert isinstance(data["latest_timestamp"], (int, float))
         assert data["count"] == len(data["packets"])
 
     @pytest.mark.integration
@@ -177,5 +179,145 @@ class TestLiveHistoryAPI:
                 assert "gateway_id" in rec
                 assert "path_type" in rec
                 assert "path_coords" in rec
+
+
+class TestLivePacketProcessingLogic:
+    """Test LivePacketService._process_packet_rows algorithmic logic."""
+
+    @pytest.mark.integration
+    def test_grouping_window_merges_receptions_within_30s(self):
+        """Test that packets with identical mesh_packet_id within 30s are merged into one broadcast."""
+        from malla.services.live_packet_service import LivePacketService
+
+        loc_cache = {100: (37.77, -122.41), 200: (37.78, -122.42), 300: (37.79, -122.43)}
+        rows = [
+            {
+                "id": 1,
+                "timestamp": 1000.0,
+                "mesh_packet_id": 9999,
+                "from_node_id": 100,
+                "to_node_id": 0xFFFFFFFF,
+                "portnum": 1,
+                "portnum_name": "TEXT_MESSAGE_APP",
+                "gateway_id": "!000000c8",  # 200
+                "channel_id": "LongFast",
+                "rssi": -80,
+                "snr": 8.0,
+                "hop_start": 3,
+                "hop_limit": 3,
+                "relay_node": 0,
+                "rx_time": 1000,
+                "raw_payload": b"Hello",
+            },
+            {
+                "id": 2,
+                "timestamp": 1002.5,
+                "mesh_packet_id": 9999,
+                "from_node_id": 100,
+                "to_node_id": 0xFFFFFFFF,
+                "portnum": 1,
+                "portnum_name": "TEXT_MESSAGE_APP",
+                "gateway_id": "!0000012c",  # 300
+                "channel_id": "LongFast",
+                "rssi": -85,
+                "snr": 6.5,
+                "hop_start": 3,
+                "hop_limit": 3,
+                "relay_node": 0,
+                "rx_time": 1002,
+                "raw_payload": b"Hello",
+            },
+        ]
+
+        result = LivePacketService._process_packet_rows(rows, loc_cache)
+        assert len(result) == 1
+        assert result[0]["mesh_packet_id"] == 9999
+        assert result[0]["gateway_count"] == 2
+        assert len(result[0]["receptions"]) == 2
+
+    @pytest.mark.integration
+    def test_grouping_window_separates_receptions_over_30s(self):
+        """Test that packets with recurring mesh_packet_id hours apart are not merged."""
+        from malla.services.live_packet_service import LivePacketService
+
+        loc_cache = {100: (37.77, -122.41), 200: (37.78, -122.42)}
+        rows = [
+            {
+                "id": 1,
+                "timestamp": 1000.0,
+                "mesh_packet_id": 9999,
+                "from_node_id": 100,
+                "to_node_id": 0xFFFFFFFF,
+                "portnum": 1,
+                "portnum_name": "TEXT_MESSAGE_APP",
+                "gateway_id": "!000000c8",
+                "channel_id": "LongFast",
+                "rssi": -80,
+                "snr": 8.0,
+                "hop_start": 3,
+                "hop_limit": 3,
+                "relay_node": 0,
+                "rx_time": 1000,
+                "raw_payload": b"Hello",
+            },
+            {
+                "id": 100,
+                "timestamp": 9050.0,  # ~2.2 hours later
+                "mesh_packet_id": 9999,
+                "from_node_id": 100,
+                "to_node_id": 0xFFFFFFFF,
+                "portnum": 1,
+                "portnum_name": "TEXT_MESSAGE_APP",
+                "gateway_id": "!000000c8",
+                "channel_id": "LongFast",
+                "rssi": -82,
+                "snr": 7.0,
+                "hop_start": 3,
+                "hop_limit": 3,
+                "relay_node": 0,
+                "rx_time": 9050,
+                "raw_payload": b"Later",
+            },
+        ]
+
+        result = LivePacketService._process_packet_rows(rows, loc_cache)
+        assert len(result) == 2
+        assert result[0]["id"] == 1
+        assert result[1]["id"] == 100
+
+    @pytest.mark.integration
+    def test_self_packet_path_type_and_hops(self):
+        """Test that packets transmitted by gateway itself resolve as 0-hop direct paths."""
+        from malla.services.live_packet_service import LivePacketService
+
+        gw_id = 500
+        loc_cache = {gw_id: (37.77, -122.41)}
+        rows = [
+            {
+                "id": 10,
+                "timestamp": 2000.0,
+                "mesh_packet_id": 1234,
+                "from_node_id": gw_id,
+                "to_node_id": 0xFFFFFFFF,
+                "portnum": 67,
+                "portnum_name": "TELEMETRY_APP",
+                "gateway_id": f"!{gw_id:08x}",
+                "channel_id": "LongFast",
+                "rssi": 0,
+                "snr": 10.0,
+                "hop_start": 3,
+                "hop_limit": 0,  # Would look like 3 hops away if not self-checked
+                "relay_node": 0,
+                "rx_time": 2000,
+                "raw_payload": None,
+            }
+        ]
+
+        result = LivePacketService._process_packet_rows(rows, loc_cache)
+        assert len(result) == 1
+        rec = result[0]["receptions"][0]
+        assert rec["hops_away"] == 0
+        assert rec["path_type"] == "direct"
+        assert rec["path_coords"] == [[37.77, -122.41], [37.77, -122.41]]
 
 
