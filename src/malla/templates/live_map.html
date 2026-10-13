@@ -113,6 +113,12 @@
     border-color: rgba(255, 193, 7, 0.3);
 }
 
+.live-status-pill.disconnected {
+    background: rgba(220, 53, 69, 0.15);
+    color: var(--bs-danger);
+    border-color: rgba(220, 53, 69, 0.3);
+}
+
 .live-status-pill .pulse-dot {
     width: 8px;
     height: 8px;
@@ -126,10 +132,21 @@
     animation: none;
 }
 
+.live-status-pill.disconnected .pulse-dot {
+    background-color: var(--bs-danger);
+    animation: live-pulse-error 1.4s infinite ease-in-out;
+}
+
 @keyframes live-pulse {
     0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(25, 135, 84, 0.7); }
     70% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 0 6px rgba(25, 135, 84, 0); }
     100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(25, 135, 84, 0); }
+}
+
+@keyframes live-pulse-error {
+    0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+    70% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 0 6px rgba(220, 53, 69, 0); }
+    100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
 }
 
 .live-feed-body {
@@ -612,6 +629,7 @@
             this.isPaused = false;
             this.onPacketsCallback = null;
             this.isPolling = false;
+            this.consecutiveErrors = 0;
 
             // Throttle polling when tab is inactive to conserve battery & network
             document.addEventListener('visibilitychange', () => {
@@ -655,21 +673,45 @@
             }
         }
 
+        onPollSuccess() {
+            if (this.consecutiveErrors > 0) {
+                this.consecutiveErrors = 0;
+                this.updatePillUI();
+            }
+        }
+
+        onPollError(err) {
+            console.warn('Live packet polling error:', err);
+            this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
+            if (this.consecutiveErrors >= 3) {
+                this.updatePillUI();
+            }
+        }
+
         updatePillUI() {
             const pill = document.getElementById('liveStatusPill');
             const text = document.getElementById('liveStatusText');
             const icon = document.getElementById('playPauseIcon');
 
+            if (!pill || !text) return;
+
             if (this.isPaused) {
-                if (pill) pill.classList.add('paused');
-                if (text) text.textContent = 'PAUSED';
+                pill.className = 'live-status-pill paused';
+                text.textContent = 'PAUSED';
                 if (icon) {
                     icon.classList.remove('bi-pause-fill');
                     icon.classList.add('bi-play-fill');
                 }
+            } else if (this.consecutiveErrors >= 3) {
+                pill.className = 'live-status-pill disconnected';
+                text.textContent = 'DISCONNECTED';
+                if (icon) {
+                    icon.classList.remove('bi-play-fill');
+                    icon.classList.add('bi-pause-fill');
+                }
             } else {
-                if (pill) pill.classList.remove('paused');
-                if (text) text.textContent = 'LIVE';
+                pill.className = 'live-status-pill';
+                text.textContent = 'LIVE';
                 if (icon) {
                     icon.classList.remove('bi-play-fill');
                     icon.classList.add('bi-pause-fill');
@@ -681,15 +723,21 @@
             if (this.isPaused || this.isPolling) return;
             this.isPolling = true;
 
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 7000);
+
             try {
                 let url = `${this.endpoint}?limit=50`;
                 if (this.cursorId !== null && this.cursorId > 0) {
                     url += `&after_id=${this.cursorId}`;
                 }
 
-                const resp = await fetch(url);
+                const resp = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
                 if (resp.status === 204) {
                     // Nothing new! Server returned 204 No Content
+                    this.onPollSuccess();
                     return;
                 }
                 if (resp.ok) {
@@ -700,9 +748,13 @@
                     if (data.packets && data.packets.length > 0 && this.onPacketsCallback) {
                         this.onPacketsCallback(data.packets);
                     }
+                    this.onPollSuccess();
+                } else {
+                    this.onPollError(new Error(`Server returned HTTP ${resp.status}`));
                 }
             } catch (err) {
-                console.warn('Live packet polling warning:', err);
+                clearTimeout(timeoutId);
+                this.onPollError(err);
             } finally {
                 this.isPolling = false;
                 if (!this.isPaused) {
@@ -854,15 +906,15 @@
     function launchPacketFlight(opts) {
         if (!map || !opts.fromLoc || !opts.toLoc) return;
 
-        // Base flight durations (slowed down for clear, readable observation)
-        let baseDuration = 1800; // direct RF beam
-        if (opts.pathType === 'arc_unknown') baseDuration = 2200;
-        else if (opts.pathType === 'relay') baseDuration = 2600;
-        else if (opts.pathType === 'multi_hop_relay') baseDuration = 2800;
-        else if (opts.pathType === 'traceroute') baseDuration = Math.max(1600, (opts.pathPoints ? opts.pathPoints.length : 2) * 850);
+        // Base flight durations (sped up by 25% for snappier propagation)
+        let baseDuration = 1350; // direct RF beam (was 1800ms)
+        if (opts.pathType === 'arc_unknown') baseDuration = 1650; // (was 2200ms)
+        else if (opts.pathType === 'relay') baseDuration = 1950; // (was 2600ms)
+        else if (opts.pathType === 'multi_hop_relay') baseDuration = 2100; // (was 2800ms)
+        else if (opts.pathType === 'traceroute') baseDuration = Math.max(1200, (opts.pathPoints ? opts.pathPoints.length : 2) * 640);
 
         const duration = Math.round(baseDuration / animationSpeedMultiplier);
-        const fadeDuration = Math.round(4200 / animationSpeedMultiplier);
+        const fadeDuration = Math.round(3150 / animationSpeedMultiplier);
 
         const flight = {
             id: 'flight_' + Math.random().toString(36).slice(2, 9),
@@ -1493,7 +1545,7 @@
                     marker.setRadius(origRadius);
                     marker.setStyle({ weight: origWeight });
                 }
-            }, Math.round(300 / animationSpeedMultiplier));
+            }, Math.round(225 / animationSpeedMultiplier));
         } catch (e) {}
 
         // 2. Double-shockwave ripple rings
@@ -1515,7 +1567,7 @@
                 const totalSteps = 28;
                 const stepRadius = (targetRadius - 7) / totalSteps;
                 const stepOpacity = startOpacity / totalSteps;
-                const stepDelay = Math.max(16, Math.round(28 / animationSpeedMultiplier));
+                const stepDelay = Math.max(16, Math.round(21 / animationSpeedMultiplier));
 
                 const interval = setInterval(() => {
                     currentRadius += stepRadius;
@@ -1536,7 +1588,7 @@
         }
 
         launchRing(0, maxRadius, 3.5, 0.95);
-        launchRing(100, Math.round(maxRadius * 0.72), 2.2, 0.75);
+        launchRing(75, Math.round(maxRadius * 0.72), 2.2, 0.75);
     }
 
     function updateActiveNodesBadge() {
@@ -1624,8 +1676,8 @@
             const pkt = packetQueue.shift();
             playSinglePacket(pkt);
 
-            // Adaptive pacing: 500ms normal, down to 100ms during bursts, scaled by speed
-            const baseDelay = packetQueue.length > 8 ? 100 : (packetQueue.length > 3 ? 240 : 500);
+            // Adaptive pacing (sped up 25%): 375ms normal, down to 75ms during bursts, scaled by speed
+            const baseDelay = packetQueue.length > 8 ? 75 : (packetQueue.length > 3 ? 180 : 375);
             const delay = Math.round(baseDelay / animationSpeedMultiplier);
             queueTimeout = setTimeout(next, delay);
         }
