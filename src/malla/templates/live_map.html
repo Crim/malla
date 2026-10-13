@@ -55,7 +55,7 @@
 
 /* Right Sidebar: Live Packet Feed */
 .live-feed-sidebar {
-    width: 360px;
+    width: 380px;
     max-width: 90vw;
     height: 100%;
     display: flex;
@@ -94,6 +94,13 @@
     background: rgba(25, 135, 84, 0.15);
     color: var(--bs-success);
     border: 1px solid rgba(25, 135, 84, 0.3);
+    transition: all 0.2s ease;
+}
+
+.live-status-pill.paused {
+    background: rgba(255, 193, 7, 0.15);
+    color: var(--bs-warning-text, #997404);
+    border-color: rgba(255, 193, 7, 0.3);
 }
 
 .live-status-pill .pulse-dot {
@@ -102,6 +109,11 @@
     border-radius: 50%;
     background-color: var(--bs-success);
     animation: live-pulse 1.8s infinite ease-in-out;
+}
+
+.live-status-pill.paused .pulse-dot {
+    background-color: var(--bs-warning);
+    animation: none;
 }
 
 @keyframes live-pulse {
@@ -116,7 +128,7 @@
     padding: 0.75rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.6rem;
 }
 
 .feed-empty-state {
@@ -132,12 +144,100 @@
     margin-bottom: 0.5rem;
 }
 
+/* Packet Cards in Live Feed */
+.packet-card {
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-left: 4px solid #6c757d;
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.85rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    animation: card-appear 0.25s ease-out;
+}
+
+@keyframes card-appear {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.packet-card:hover {
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.packet-card.type-text { border-left-color: #4f46e5; }
+.packet-card.type-position { border-left-color: #10b981; }
+.packet-card.type-telemetry { border-left-color: #f59e0b; }
+.packet-card.type-traceroute { border-left-color: #06b6d4; }
+.packet-card.type-nodeinfo { border-left-color: #8b5cf6; }
+
+.packet-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.3rem;
+}
+
+.packet-type-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.badge-text { background-color: rgba(79, 70, 229, 0.15); color: #4f46e5; }
+.badge-position { background-color: rgba(16, 185, 129, 0.15); color: #10b981; }
+.badge-telemetry { background-color: rgba(245, 158, 11, 0.15); color: #d97706; }
+.badge-traceroute { background-color: rgba(6, 182, 212, 0.15); color: #0891b2; }
+.badge-nodeinfo { background-color: rgba(139, 92, 246, 0.15); color: #7c3aed; }
+.badge-other { background-color: rgba(107, 114, 128, 0.15); color: #6b7280; }
+
+.packet-card-meta {
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color);
+}
+
+.packet-card-nodes {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--bs-body-color);
+}
+
+.packet-text-snippet {
+    background: var(--bs-tertiary-bg);
+    border-radius: 4px;
+    padding: 0.35rem 0.5rem;
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+    font-family: var(--bs-font-monospace);
+    word-break: break-word;
+    border: 1px solid var(--bs-border-color);
+}
+
+.reception-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    margin-top: 0.25rem;
+}
+
 /* Bottom Control Bar / VCR Bar */
 .live-control-bar {
     position: absolute;
     bottom: 16px;
     left: 16px;
-    right: 376px; /* offset for right sidebar */
+    right: 396px; /* offset for right sidebar */
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
     border-radius: 10px;
@@ -212,9 +312,9 @@
         <div class="live-control-bar">
             <!-- Left Info -->
             <div class="d-flex align-items-center gap-2">
-                <span class="live-status-pill">
+                <span class="live-status-pill" id="liveStatusPill">
                     <span class="pulse-dot"></span>
-                    <span>LIVE</span>
+                    <span id="liveStatusText">LIVE</span>
                 </span>
                 <span class="badge text-bg-secondary" id="activeNodesBadge">0 nodes</span>
                 <span class="small text-muted d-none d-md-inline" id="packetRateBadge">0 pkts/min</span>
@@ -223,7 +323,7 @@
             <!-- Center Controls (Replay / VCR Scaffold) -->
             <div class="d-flex align-items-center gap-2">
                 <button class="btn btn-sm btn-outline-primary" id="playPauseBtn" title="Pause / Resume Live Feed">
-                    <i class="bi bi-pause-fill"></i>
+                    <i class="bi bi-pause-fill" id="playPauseIcon"></i>
                 </button>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Playback speed">
                     <button type="button" class="btn btn-outline-secondary active">1x</button>
@@ -249,7 +349,10 @@
                 <i class="bi bi-activity text-primary fs-5"></i>
                 <h6 class="mb-0 fw-bold">Live Traffic Feed</h6>
             </div>
-            <div class="d-flex align-items-center gap-1">
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-sm btn-outline-secondary p-1" id="clearFeedBtn" title="Clear feed list">
+                    <i class="bi bi-trash"></i>
+                </button>
                 <span class="badge bg-primary rounded-pill" id="feedPacketCount">0</span>
                 <button class="btn btn-sm btn-link text-muted p-1" id="closeSidebarBtn" title="Close Sidebar">
                     <i class="bi bi-x-lg"></i>
@@ -282,10 +385,141 @@
     'use strict';
 
     let map = null;
-    let nodeMarkers = [];
-    let knownNodes = [];
+    const nodeMarkersMap = new Map(); // nodeId (int) -> { marker, lat, lng, nodeData }
+    let streamProvider = null;
+    let totalPacketsReceived = 0;
+    const packetTimestampsWindow = []; // for calculating pkts/min
+    const MAX_FEED_ITEMS = 100;
 
-    // Initialize Map
+    // Role colors matching Malla's standard map
+    const ROLE_COLORS = {
+        'ROUTER': '#28a745',
+        'ROUTER_LATE': '#28a745',
+        'CLIENT': '#007bff',
+        'REPEATER': '#ffc107',
+        'CLIENT_MUTE': '#6c757d',
+        'CLIENT_BASE': '#007bff',
+        'ROUTER_CLIENT': '#17a2b8',
+        'SENSOR': '#e83e8c',
+        'UNKNOWN': '#6c757d',
+    };
+
+    function getNodeColor(role) {
+        if (!role) return '#0d6efd';
+        return ROLE_COLORS[String(role).toUpperCase()] || '#0d6efd';
+    }
+
+    // =========================================================================
+    // 1. PollingStreamProvider (Future-proof abstraction)
+    // =========================================================================
+    class PollingStreamProvider {
+        constructor(endpoint = '/api/live/packets', pollIntervalMs = 1500) {
+            this.endpoint = endpoint;
+            this.pollIntervalMs = pollIntervalMs;
+            this.cursorId = null;
+            this.timer = null;
+            this.isPaused = false;
+            this.onPacketsCallback = null;
+            this.isPolling = false;
+
+            // Throttle polling when tab is inactive to conserve battery & network
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    this.pollIntervalMs = 5000;
+                } else {
+                    this.pollIntervalMs = 1500;
+                    if (!this.isPaused && !this.isPolling) {
+                        this.pollNow();
+                    }
+                }
+            });
+        }
+
+        onPackets(cb) {
+            this.onPacketsCallback = cb;
+        }
+
+        start() {
+            this.isPaused = false;
+            this.pollNow();
+        }
+
+        pause() {
+            this.isPaused = true;
+            if (this.timer) clearTimeout(this.timer);
+            this.updatePillUI();
+        }
+
+        resume() {
+            this.isPaused = false;
+            this.updatePillUI();
+            this.pollNow();
+        }
+
+        togglePause() {
+            if (this.isPaused) {
+                this.resume();
+            } else {
+                this.pause();
+            }
+        }
+
+        updatePillUI() {
+            const pill = document.getElementById('liveStatusPill');
+            const text = document.getElementById('liveStatusText');
+            const icon = document.getElementById('playPauseIcon');
+
+            if (this.isPaused) {
+                if (pill) pill.classList.add('paused');
+                if (text) text.textContent = 'PAUSED';
+                if (icon) {
+                    icon.classList.remove('bi-pause-fill');
+                    icon.classList.add('bi-play-fill');
+                }
+            } else {
+                if (pill) pill.classList.remove('paused');
+                if (text) text.textContent = 'LIVE';
+                if (icon) {
+                    icon.classList.remove('bi-play-fill');
+                    icon.classList.add('bi-pause-fill');
+                }
+            }
+        }
+
+        async pollNow() {
+            if (this.isPaused || this.isPolling) return;
+            this.isPolling = true;
+
+            try {
+                let url = `${this.endpoint}?limit=50`;
+                if (this.cursorId !== null && this.cursorId > 0) {
+                    url += `&after_id=${this.cursorId}`;
+                }
+
+                const resp = await fetch(url);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.latest_id !== undefined && data.latest_id !== null) {
+                        this.cursorId = data.latest_id;
+                    }
+                    if (data.packets && data.packets.length > 0 && this.onPacketsCallback) {
+                        this.onPacketsCallback(data.packets);
+                    }
+                }
+            } catch (err) {
+                console.warn('Live packet polling warning:', err);
+            } finally {
+                this.isPolling = false;
+                if (!this.isPaused) {
+                    this.timer = setTimeout(() => this.pollNow(), this.pollIntervalMs);
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // 2. Map Initialization & Dynamic Marker Management
+    // =========================================================================
     function initMap() {
         const mapOptions = window.openFreeMapLeafletMapOptions || {
             minZoom: 2,
@@ -299,10 +533,8 @@
             ...mapOptions
         });
 
-        // Add zoom control top-left
         L.control.zoom({ position: 'topleft' }).addTo(map);
 
-        // Add OpenFreeMap basemap layer
         let basemap = null;
         if (typeof window.createOpenFreeMapOverlay === 'function') {
             basemap = window.createOpenFreeMapOverlay();
@@ -311,18 +543,15 @@
         if (basemap) {
             basemap.addTo(map);
         } else {
-            // Fallback to standard OSM tiles if MapLibre fails
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors',
                 maxZoom: 19
             }).addTo(map);
         }
 
-        // Fetch known node locations to center and populate map
         fetchInitialNodes();
     }
 
-    // Fetch existing node locations
     async function fetchInitialNodes() {
         try {
             const resp = await fetch('/api/locations');
@@ -331,61 +560,313 @@
             document.getElementById('mapLoadingOverlay').style.display = 'none';
 
             if (data && data.locations && Array.isArray(data.locations)) {
-                knownNodes = data.locations;
-                plotNodes(knownNodes);
+                data.locations.forEach(node => {
+                    if (node.latitude != null && node.longitude != null) {
+                        updateOrSpawnNodeMarker(node.node_id, Number(node.latitude), Number(node.longitude), node);
+                    }
+                });
+
+                fitMapBounds();
             }
+
+            // Start live streaming once initial map is ready
+            startLiveStream();
         } catch (err) {
             console.error('Error fetching initial locations:', err);
             document.getElementById('mapLoadingOverlay').style.display = 'none';
+            startLiveStream();
         }
     }
 
-    // Plot nodes on the map
-    function plotNodes(nodes) {
-        // Clear existing markers
-        nodeMarkers.forEach(m => map.removeLayer(m));
-        nodeMarkers = [];
+    // Dynamic Node Marker Repositioning & Spawning
+    function updateOrSpawnNodeMarker(nodeId, lat, lng, nodeData, isPositionUpdate = false) {
+        if (!nodeId || isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null;
 
-        const bounds = L.latLngBounds();
+        const existing = nodeMarkersMap.get(nodeId);
 
-        nodes.forEach(node => {
-            if (node.latitude == null || node.longitude == null) return;
+        if (existing) {
+            // Check if coordinates moved
+            const moved = Math.abs(existing.lat - lat) > 0.00005 || Math.abs(existing.lng - lng) > 0.00005;
 
-            const lat = Number(node.latitude);
-            const lng = Number(node.longitude);
-            if (isNaN(lat) || isNaN(lng)) return;
+            if (moved) {
+                // Smoothly update marker position
+                existing.marker.setLatLng([lat, lng]);
+                existing.lat = lat;
+                existing.lng = lng;
 
-            const marker = L.circleMarker([lat, lng], {
-                radius: 6,
-                fillColor: '#0d6efd',
-                color: '#ffffff',
-                weight: 1.5,
-                opacity: 1,
-                fillOpacity: 0.85
-            });
+                // Visual relocation indicator (temporary bright green ring)
+                triggerMarkerPulse(existing.marker, '#10b981', 12);
+            }
 
-            const popupContent = `
-                <div style="min-width: 140px;">
-                    <strong>${escapeHtml(node.long_name || node.short_name || node.hex_id || 'Node')}</strong><br>
-                    <small class="text-muted">${escapeHtml(node.hex_id || '')}</small><br>
-                    <small class="badge bg-secondary mt-1">${escapeHtml(node.role || 'CLIENT')}</small>
-                </div>
-            `;
-            marker.bindPopup(popupContent);
-            marker.addTo(map);
-            nodeMarkers.push(marker);
-            bounds.extend([lat, lng]);
-        });
-
-        // Update active nodes count badge
-        const badge = document.getElementById('activeNodesBadge');
-        if (badge) {
-            badge.textContent = `${nodeMarkers.length} nodes`;
+            // Update popup content with newest data
+            const updatedData = { ...existing.nodeData, ...nodeData, latitude: lat, longitude: lng };
+            existing.nodeData = updatedData;
+            existing.marker.setPopupContent(buildPopupHtml(updatedData));
+            return existing.marker;
         }
 
-        // Fit map bounds if nodes exist
-        if (nodeMarkers.length > 0) {
+        // Spawn brand new marker for this radio
+        const role = nodeData.role || 'CLIENT';
+        const color = getNodeColor(role);
+
+        const marker = L.circleMarker([lat, lng], {
+            radius: 6,
+            fillColor: color,
+            color: '#ffffff',
+            weight: 1.5,
+            opacity: 1,
+            fillOpacity: 0.85
+        });
+
+        marker.bindPopup(buildPopupHtml({ ...nodeData, node_id: nodeId, latitude: lat, longitude: lng }));
+        marker.addTo(map);
+
+        nodeMarkersMap.set(nodeId, {
+            marker,
+            lat,
+            lng,
+            nodeData: { ...nodeData, node_id: nodeId, latitude: lat, longitude: lng }
+        });
+
+        updateActiveNodesBadge();
+        return marker;
+    }
+
+    function buildPopupHtml(node) {
+        return `
+            <div style="min-width: 140px;">
+                <strong>${escapeHtml(node.long_name || node.short_name || node.hex_id || 'Node')}</strong><br>
+                <small class="text-muted">${escapeHtml(node.hex_id || '')}</small><br>
+                <span class="badge mt-1" style="background-color: ${getNodeColor(node.role)}">${escapeHtml(node.role || 'CLIENT')}</span>
+                ${node.latitude && node.longitude ? `<div class="small text-muted mt-1">${node.latitude.toFixed(4)}, ${node.longitude.toFixed(4)}</div>` : ''}
+            </div>
+        `;
+    }
+
+    function triggerMarkerPulse(marker, color = '#00f2fe', maxRadius = 16) {
+        if (!marker || !map) return;
+        const latLng = marker.getLatLng();
+
+        const pulseCircle = L.circleMarker(latLng, {
+            radius: 6,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.6,
+            weight: 2,
+            opacity: 0.9,
+            interactive: false
+        }).addTo(map);
+
+        let currentRadius = 6;
+        let currentOpacity = 0.8;
+
+        const pulseInterval = setInterval(() => {
+            currentRadius += 1.5;
+            currentOpacity -= 0.08;
+
+            if (currentOpacity <= 0 || currentRadius >= maxRadius) {
+                clearInterval(pulseInterval);
+                map.removeLayer(pulseCircle);
+            } else {
+                pulseCircle.setRadius(currentRadius);
+                pulseCircle.setStyle({
+                    opacity: currentOpacity,
+                    fillOpacity: currentOpacity * 0.5
+                });
+            }
+        }, 30);
+    }
+
+    function updateActiveNodesBadge() {
+        const badge = document.getElementById('activeNodesBadge');
+        if (badge) {
+            badge.textContent = `${nodeMarkersMap.size} nodes`;
+        }
+    }
+
+    function fitMapBounds() {
+        if (nodeMarkersMap.size === 0) return;
+        const bounds = L.latLngBounds();
+        nodeMarkersMap.forEach(item => bounds.extend([item.lat, item.lng]));
+        if (bounds.isValid()) {
             map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+        }
+    }
+
+    // =========================================================================
+    // 3. Live Feed UI & Packet Processing
+    // =========================================================================
+    function startLiveStream() {
+        streamProvider = new PollingStreamProvider('/api/live/packets', 1500);
+        streamProvider.onPackets(handleIncomingPackets);
+        streamProvider.start();
+    }
+
+    function handleIncomingPackets(packets) {
+        if (!packets || packets.length === 0) return;
+
+        const emptyState = document.getElementById('feedEmptyState');
+        if (emptyState) emptyState.style.display = 'none';
+
+        const feedBody = document.getElementById('liveFeedBody');
+        const now = Date.now();
+
+        packets.forEach(pkt => {
+            totalPacketsReceived++;
+            packetTimestampsWindow.push(now);
+
+            // 1. Dynamic marker repositioning / spawning if packet has location
+            if (pkt.from_node_id && pkt.from_location) {
+                const lat = pkt.from_location.latitude;
+                const lon = pkt.from_location.longitude;
+                updateOrSpawnNodeMarker(pkt.from_node_id, lat, lon, {
+                    long_name: pkt.from_node_name,
+                    short_name: pkt.from_node_short_name,
+                    hex_id: pkt.from_node_hex,
+                }, pkt.portnum === 3);
+            }
+
+            // 2. Pulse sender marker on transmission
+            if (pkt.from_node_id && nodeMarkersMap.has(pkt.from_node_id)) {
+                triggerMarkerPulse(nodeMarkersMap.get(pkt.from_node_id).marker, '#4f46e5', 14);
+            }
+
+            // 3. Pulse gateway markers on reception
+            if (pkt.receptions && pkt.receptions.length > 0) {
+                pkt.receptions.forEach(rec => {
+                    if (rec.gateway_node_id && nodeMarkersMap.has(rec.gateway_node_id)) {
+                        triggerMarkerPulse(nodeMarkersMap.get(rec.gateway_node_id).marker, '#06b6d4', 12);
+                    }
+                });
+            }
+
+            // 4. Render feed card and prepend to top
+            const card = createPacketCard(pkt);
+            if (feedBody) {
+                feedBody.prepend(card);
+            }
+        });
+
+        // Prune old cards exceeding buffer size
+        if (feedBody) {
+            const cards = feedBody.querySelectorAll('.packet-card');
+            for (let i = MAX_FEED_ITEMS; i < cards.length; i++) {
+                cards[i].remove();
+            }
+        }
+
+        // Update counter badges
+        const countBadge = document.getElementById('feedPacketCount');
+        if (countBadge) countBadge.textContent = String(totalPacketsReceived);
+
+        updatePacketRate();
+    }
+
+    function createPacketCard(pkt) {
+        const card = document.createElement('div');
+        const typeClass = getPacketTypeClass(pkt.portnum_name);
+        card.className = `packet-card ${typeClass}`;
+
+        const timeStr = formatTimestamp(pkt.timestamp);
+        const fromName = pkt.from_node_name || pkt.from_node_hex || 'Unknown';
+        const toName = pkt.to_node_name || (pkt.is_broadcast ? 'Broadcast' : 'Node');
+
+        // Main primary reception for card stats
+        const primaryRec = (pkt.receptions && pkt.receptions.length > 0) ? pkt.receptions[0] : null;
+        const hopsAway = primaryRec ? primaryRec.hops_away : null;
+        const hopLabel = hopsAway === 0 ? 'Direct' : (hopsAway != null ? `${hopsAway} hop${hopsAway > 1 ? 's' : ''}` : '—');
+        const snrVal = primaryRec && primaryRec.snr != null ? primaryRec.snr.toFixed(1) : null;
+
+        let content = `
+            <div class="packet-card-header">
+                <span class="packet-type-badge ${getBadgeClass(pkt.portnum_name)}">
+                    ${getPacketTypeIcon(pkt.portnum_name)} ${escapeHtml(formatPortName(pkt.portnum_name))}
+                </span>
+                <span class="packet-card-meta">${escapeHtml(timeStr)}</span>
+            </div>
+            <div class="packet-card-nodes">
+                <span>${escapeHtml(fromName)}</span>
+                <i class="bi bi-arrow-right text-muted" style="font-size: 0.75rem;"></i>
+                <span>${escapeHtml(toName)}</span>
+            </div>
+        `;
+
+        if (pkt.text_preview) {
+            content += `<div class="packet-text-snippet">${escapeHtml(pkt.text_preview)}</div>`;
+        }
+
+        if (pkt.receptions && pkt.receptions.length > 1) {
+            content += `
+                <div class="reception-pill text-primary fw-semibold">
+                    <i class="bi bi-broadcast-pin"></i> Heard by ${pkt.receptions.length} gateways
+                </div>
+            `;
+        } else if (primaryRec && primaryRec.gateway_name) {
+            content += `
+                <div class="d-flex align-items-center gap-2 mt-1">
+                    <span class="reception-pill">
+                        <i class="bi bi-reception-4"></i> ${escapeHtml(primaryRec.gateway_name)}
+                    </span>
+                    ${snrVal ? `<span class="badge ${snrVal >= 0 ? 'bg-success' : 'bg-secondary'}">${snrVal} dB</span>` : ''}
+                    <span class="badge bg-light text-dark border">${hopLabel}</span>
+                </div>
+            `;
+        }
+
+        card.innerHTML = content;
+        return card;
+    }
+
+    function getPacketTypeClass(name) {
+        if (!name) return 'type-other';
+        if (name.includes('TEXT')) return 'type-text';
+        if (name.includes('POSITION')) return 'type-position';
+        if (name.includes('TELEMETRY')) return 'type-telemetry';
+        if (name.includes('ROUTING')) return 'type-traceroute';
+        if (name.includes('NODEINFO')) return 'type-nodeinfo';
+        return 'type-other';
+    }
+
+    function getBadgeClass(name) {
+        if (!name) return 'badge-other';
+        if (name.includes('TEXT')) return 'badge-text';
+        if (name.includes('POSITION')) return 'badge-position';
+        if (name.includes('TELEMETRY')) return 'badge-telemetry';
+        if (name.includes('ROUTING')) return 'badge-traceroute';
+        if (name.includes('NODEINFO')) return 'badge-nodeinfo';
+        return 'badge-other';
+    }
+
+    function getPacketTypeIcon(name) {
+        if (!name) return '📦';
+        if (name.includes('TEXT')) return '💬';
+        if (name.includes('POSITION')) return '📍';
+        if (name.includes('TELEMETRY')) return '🔋';
+        if (name.includes('ROUTING')) return '🧭';
+        if (name.includes('NODEINFO')) return 'ℹ️';
+        return '📦';
+    }
+
+    function formatPortName(name) {
+        if (!name) return 'PACKET';
+        return name.replace('_APP', '').replace(/_/g, ' ');
+    }
+
+    function formatTimestamp(ts) {
+        if (!ts) return '';
+        const d = new Date(ts * 1000);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function updatePacketRate() {
+        const now = Date.now();
+        // Remove timestamps older than 60 seconds
+        while (packetTimestampsWindow.length > 0 && packetTimestampsWindow[0] < now - 60000) {
+            packetTimestampsWindow.shift();
+        }
+        const rateBadge = document.getElementById('packetRateBadge');
+        if (rateBadge) {
+            rateBadge.textContent = `${packetTimestampsWindow.length} pkts/min`;
         }
     }
 
@@ -399,11 +880,15 @@
             .replace(/'/g, '&#039;');
     }
 
-    // Sidebar Toggles
+    // =========================================================================
+    // 4. UI Events & Controls
+    // =========================================================================
     const sidebar = document.getElementById('liveFeedSidebar');
     const toggleBtn = document.getElementById('sidebarToggleBtn');
     const closeBtn = document.getElementById('closeSidebarBtn');
+    const clearBtn = document.getElementById('clearFeedBtn');
     const fitNodesBtn = document.getElementById('fitNodesBtn');
+    const playPauseBtn = document.getElementById('playPauseBtn');
 
     function toggleSidebar() {
         sidebar.classList.toggle('collapsed');
@@ -413,16 +898,31 @@
     if (toggleBtn) toggleBtn.addEventListener('click', toggleSidebar);
     if (closeBtn) closeBtn.addEventListener('click', toggleSidebar);
 
-    if (fitNodesBtn) {
-        fitNodesBtn.addEventListener('click', () => {
-            if (nodeMarkers.length > 0) {
-                const bounds = L.latLngBounds(nodeMarkers.map(m => m.getLatLng()));
-                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            const feedBody = document.getElementById('liveFeedBody');
+            if (feedBody) {
+                feedBody.innerHTML = `
+                    <div class="feed-empty-state" id="feedEmptyState">
+                        <i class="bi bi-radar"></i>
+                        <h6 class="fw-bold mt-2">Waiting for traffic</h6>
+                        <p class="small text-muted mb-0">Packets captured by the mesh will appear here and animate across the map in real time.</p>
+                    </div>
+                `;
             }
         });
     }
 
-    // Initialize on DOM load
+    if (fitNodesBtn) {
+        fitNodesBtn.addEventListener('click', fitMapBounds);
+    }
+
+    if (playPauseBtn) {
+        playPauseBtn.addEventListener('click', () => {
+            if (streamProvider) streamProvider.togglePause();
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', initMap);
 })();
 </script>
