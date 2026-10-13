@@ -27,6 +27,29 @@ home_markdown: |
   This content is written in **Markdown** and will appear at the top of the
   dashboard. You can use standard Markdown formatting.
 
+# Chat options --------------------------------------------------------------
+
+# Filter out channels in the Chat UI that have no decrypted text messages.
+# When false (default), all observed packet channels are listed in the chat dropdown.
+# Corresponding env var: MALLA_CHAT_HIDE_EMPTY_CHANNELS
+# chat_hide_empty_channels: false
+
+# Restrict the Chat UI to only show specific channels.
+# When set, only channels in this list will appear in the chat channel dropdown.
+# Supports YAML list or comma-separated string. Empty list (default) allows all.
+# Corresponding env var: MALLA_CHAT_INCLUDE_CHANNELS (e.g. "LongFast,LocalChat")
+# chat_include_channels:
+#   - LongFast
+#   - LocalChat
+
+# Exclude specific channels from appearing in the Chat UI dropdown.
+# When set, these channels are removed from the chat channel dropdown.
+# Supports YAML list or comma-separated string. Empty list (default) excludes none.
+# If both include and exclude are set, excluded channels are removed from the included list.
+# Corresponding env var: MALLA_CHAT_EXCLUDE_CHANNELS (e.g. "PrivateChannel,TestChannel")
+# chat_exclude_channels:
+#   - PrivateChannel
+
 # Flask / server options ----------------------------------------------------
 
 # Secret key used by Flask for session signing (change for production!)

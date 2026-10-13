@@ -13,6 +13,10 @@
     var messagesEl = document.getElementById('chatMessages');
     var statusEl   = document.getElementById('chatStatus');
     var channelSel = document.getElementById('channelFilter');
+    var defaultChannel = (channelSel && channelSel.options.length > 0)
+        ? channelSel.options[0].value
+        : (channelSel ? channelSel.value : '');
+    var CHANNEL_STORAGE_KEY = 'malla-chat-channel';
     var scrollBtn  = document.getElementById('scrollBottomBtn');
     var unreadEl   = document.getElementById('unreadCount');
     var pauseBtn   = document.getElementById('pauseBtn');
@@ -23,6 +27,32 @@
     var lastId = 0, pollTimer = null, paused = false;
     var soundEnabled = localStorage.getItem('malla-chat-sound') === '1';
     var unreadCount = 0;
+
+    function getStoredChannel() {
+        try {
+            return localStorage.getItem(CHANNEL_STORAGE_KEY);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function setStoredChannel(val) {
+        try {
+            if (val && val !== defaultChannel) {
+                localStorage.setItem(CHANNEL_STORAGE_KEY, val);
+            } else {
+                localStorage.removeItem(CHANNEL_STORAGE_KEY);
+            }
+        } catch (e) {}
+    }
+
+    function hasChannelOption(val) {
+        if (!channelSel) return false;
+        for (var i = 0; i < channelSel.options.length; i++) {
+            if (channelSel.options[i].value === val) return true;
+        }
+        return false;
+    }
 
     var nodeCache = {};
     var messagesByMesh = new Map();
@@ -726,15 +756,18 @@
 
     async function loadChannels() {
         try {
-            var resp = await fetch('/api/meshtastic/packet-channels');
-            if (!resp.ok) return;
+            var resp = await fetch('/api/chat/channels');
+            if (!resp.ok) return false;
             var data = await resp.json();
             (data.channels || []).forEach(function (ch) {
                 var opt = document.createElement('option');
                 opt.value = ch; opt.textContent = ch;
                 channelSel.appendChild(opt);
             });
-        } catch (e) {}
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
 
     // ----- search -----
@@ -793,7 +826,10 @@
         updateScrollButton();
     });
 
-    channelSel.addEventListener('change', resetChat);
+    channelSel.addEventListener('change', function () {
+        setStoredChannel(channelSel.value);
+        resetChat();
+    });
 
     pauseBtn.addEventListener('click', function () {
         paused = !paused;
@@ -890,7 +926,13 @@
     // Handle browser back/forward
     window.addEventListener('popstate', function () {
         var s = readUrlState();
-        channelSel.value = s.channel;
+        var targetChannel = s.channel || defaultChannel;
+        if (hasChannelOption(targetChannel)) {
+            channelSel.value = targetChannel;
+        } else {
+            channelSel.value = defaultChannel;
+        }
+        setStoredChannel(channelSel.value);
         searchIn.value = s.search;
         searchTerm = s.search;
         resetChat();
@@ -899,9 +941,33 @@
     // ----- init -----
 
     (async function init() {
-        await loadChannels();
+        var loadChannelsSucceeded = await loadChannels();
         var s = readUrlState();
-        if (s.channel) channelSel.value = s.channel;
+        var savedChannel = getStoredChannel();
+
+        if (s.channel) {
+            if (hasChannelOption(s.channel)) {
+                channelSel.value = s.channel;
+                setStoredChannel(s.channel);
+            } else {
+                channelSel.value = defaultChannel;
+                pushUrlState();
+            }
+        } else if (savedChannel) {
+            if (hasChannelOption(savedChannel)) {
+                channelSel.value = savedChannel;
+                pushUrlState();
+            } else if (loadChannelsSucceeded) {
+                setStoredChannel(defaultChannel);
+                channelSel.value = defaultChannel;
+                pushUrlState();
+            } else {
+                channelSel.value = defaultChannel;
+            }
+        } else {
+            channelSel.value = defaultChannel;
+        }
+
         if (s.search) { searchIn.value = s.search; searchTerm = s.search; }
         updateSoundBtn();
         await loadInitial();

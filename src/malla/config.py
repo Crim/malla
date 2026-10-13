@@ -1,6 +1,7 @@
 # This module implements application-wide configuration handling.
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -33,6 +34,14 @@ class AppConfig:
     # custom_css recolors the whole site (buttons, links, navbar, ...).
     custom_css: str = ""
     custom_html_head: str = ""
+
+    # Chat settings
+    # When enabled, only channels with decrypted text messages are returned to the chat UI
+    chat_hide_empty_channels: bool = False
+    # Optional list of channel names to include in the chat UI (empty = all allowed)
+    chat_include_channels: list[str] = field(default_factory=list)
+    # Optional list of channel names to exclude from the chat UI (empty = none excluded)
+    chat_exclude_channels: list[str] = field(default_factory=list)
 
     # Flask/server settings
     secret_key: str = "dev-secret-key-change-in-production"
@@ -101,6 +110,14 @@ class AppConfig:
         # Filter out empty keys
         return [key for key in keys if key]
 
+    def get_chat_include_channels(self) -> list[str]:
+        """Return normalized list of channels to include in the chat UI."""
+        return _normalize_channel_list(self.chat_include_channels)
+
+    def get_chat_exclude_channels(self) -> list[str]:
+        """Return normalized list of channels to exclude from the chat UI."""
+        return _normalize_channel_list(self.chat_exclude_channels)
+
 
 # ---------------------------------------------------------------------------
 # Loader helpers
@@ -111,14 +128,41 @@ _YAML_DEFAULT_PATH = "config.yaml"
 _ENV_PREFIX = "MALLA_"  # Prefix for environment variable overrides
 
 
+def _normalize_channel_list(val: Any) -> list[str]:
+    """Normalize a list, comma-separated string, or JSON array string of channel names into list[str]."""
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(item).strip() for item in val if str(item).strip()]
+    if isinstance(val, str):
+        val = val.strip()
+        if not val:
+            return []
+        if val.startswith("[") and val.endswith("]"):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            except Exception:
+                pass
+        return [item.strip() for item in val.split(",") if item.strip()]
+    return []
+
+
 def _resolve_type(t: Any) -> Any:  # noqa: ANN001
     """Resolve **t** which may be a string forward-reference or Optional into a real type."""
 
     if isinstance(t, str):
         # Strip Optional[X] / X | None suffix to get the base type
         base = t.replace(" | None", "").strip()
+        if base.startswith("list") or base.startswith("List"):
+            return list
         builtins_map = {"bool": bool, "int": int, "float": float, "str": str}
         return builtins_map.get(base, str)
+    if hasattr(t, "__origin__") and t.__origin__ is list:
+        return list
+    if t is list:
+        return list
     return t
 
 
@@ -134,6 +178,8 @@ def _coerce_value(value: str, target_type):  # noqa: ANN001
             return int(value)
         if target_type is float:
             return float(value)
+        if target_type is list:
+            return _normalize_channel_list(value)
     except ValueError:
         logger.warning(
             "Could not coerce environment variable '%s' to %s – using raw string",
@@ -182,6 +228,11 @@ def load_config(config_path: str | os.PathLike | None = None) -> AppConfig:  # n
         env_key = f"{_ENV_PREFIX}{field_name}".upper()
         if env_key in os.environ:
             data[field_name] = _coerce_value(os.environ[env_key], field_obj.type)
+
+    if "chat_include_channels" in data:
+        data["chat_include_channels"] = _normalize_channel_list(data["chat_include_channels"])
+    if "chat_exclude_channels" in data:
+        data["chat_exclude_channels"] = _normalize_channel_list(data["chat_exclude_channels"])
 
     # Construct the config instance
     config = AppConfig(**data)  # type: ignore[arg-type]
